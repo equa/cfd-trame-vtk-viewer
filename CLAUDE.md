@@ -175,6 +175,12 @@ Integrating into the EQUA CFD frontend (repo `cfd-restful-backend`, the
 - **A1 done:** `?case=<name>` deep link — `_preselect()` + an aiohttp request
   middleware in `_add_http_routes` (server-side; window.location is unreachable
   from Vue expressions). Verify with the screenshot filename, see below.
+- **A3 done:** service robustness. `main.py --server` no longer exits on an
+  empty `--data` (interactive use still does); the app stores `case_root`,
+  clears `_loading` on an empty start, and `_preselect()` re-scans the case root
+  (`_rescan_cases()`, also refreshing the drawer) when the name is unknown — so
+  cases created after startup resolve. Note: only lazy rescan on deep link; the
+  drawer does not auto-poll for new cases.
 - **A2 pending (needs a live proxy, likely Niklas's env):** serving under the
   `/viz/` base path behind nginx — the wslink client must open its WebSocket and
   load assets relative to the mount.

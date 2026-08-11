@@ -32,13 +32,19 @@ def main():
 
     cases = find_cases(args.data)
     if not cases:
-        parser.error(
+        msg = (
             f"no OpenFOAM case found under {args.data!r} "
             "(a case is a directory containing system/controlDict)"
         )
-    print(f"FoamViz: {len(cases)} case(s) under {args.data}")
-    for case in cases:
-        print(f"  - {case.name}")
+        # Interactive use: a mistyped --data is worth failing on. Service mode
+        # (--server) keeps running and discovers cases on demand as they appear.
+        if not args.server:
+            parser.error(msg)
+        print(f"FoamViz: {msg}; serving empty, will pick up cases as they appear")
+    else:
+        print(f"FoamViz: {len(cases)} case(s) under {args.data}")
+        for case in cases:
+            print(f"  - {case.name}")
 
     app = FoamViz(args.data)
     app.start(port=args.port, host=args.host, open_browser=not args.server)

@@ -56,6 +56,7 @@ class FoamViz:
         self.server = get_server(server, client_type="vue3")
         self.pipeline = FoamPipeline()
         self.case = None
+        self.case_root = case_root  # kept so cases can be re-scanned on demand
         self._player_task = None
         self.ctrl.on_server_bind.add(self._add_http_routes)
 
@@ -69,6 +70,11 @@ class FoamViz:
 
         if self.case_paths:
             self.load_case(next(iter(self.case_paths)))
+        else:
+            # Empty case root — e.g. a service started before any case exists.
+            # Serve anyway and pick cases up on demand (rescan on deep link).
+            # Must clear _loading here, or every change handler stays guarded out.
+            self._loading = False
 
     # ------------------------------------------------------------------ state
 
@@ -268,10 +274,23 @@ class FoamViz:
         if self.case is None or case_name != self.case.name:
             self.load_case(case_name)
 
+    def _rescan_cases(self):
+        """Re-read the case root — cases can appear after startup — and refresh
+        the drawer list. Returns the updated case_paths."""
+        self.case_paths = {p.name: str(p) for p in find_cases(self.case_root)}
+        with self.state:
+            self.state.case_items = sorted(self.case_paths)
+        return self.case_paths
+
     def _preselect(self, name):
-        """Load a case by name if known and not already shown — the hook for the
-        ``/viz/?case=<name>`` deep link (see :meth:`_add_http_routes`)."""
-        if name and name in self.case_paths and (self.case is None or name != self.case.name):
+        """Load a case by name — the hook for the ``/viz/?case=<name>`` deep link
+        (see :meth:`_add_http_routes`). Re-scans the case root first if the name
+        is unknown, so a case created after startup still resolves."""
+        if not name:
+            return
+        if name not in self.case_paths:
+            self._rescan_cases()
+        if name in self.case_paths and (self.case is None or name != self.case.name):
             self.load_case(name)
 
     @change("time_index")
