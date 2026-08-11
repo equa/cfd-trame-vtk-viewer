@@ -157,12 +157,37 @@ transfer function and the HTML legend gradient, so they cannot drift apart.
 The cut plane is the hub — the slice, the stream-tracer seeds and the glyph
 seeds all derive from it.
 
-## Backend integration — open questions
+## Backend integration
 
-Nothing here is decided; these are the questions to put to Niklas first rather
-than guess at. Related memories: `project_openfoam_api` (Flask job-control API
-on :5001, OpenFOAM 13, CFD home `/home/niklas/tmp/cfdhome`) and
-`project_iceopenfoam` (EQUA's OpenFOAM-13 extension libs).
+### Decided (2026-08-11, with Niklas)
+
+Integrating into the EQUA CFD frontend (repo `cfd-restful-backend`, the
+`cfd-backend`/`cfd-file-server`/`cfd-frontend` images):
+
+- **Shape:** FoamViz becomes a **4th service, `cfd-viz`**, behind the nginx
+  `cfd-frontend`, which proxies `/viz/*` (HTTP **and** WebSocket upgrade) to it.
+  It reads cases straight off the shared `CFD_HOME` volume — no OpenFOAM install
+  needed, `vtkOpenFOAMReader` reads the case files directly. React embeds it as
+  a **full-page** view via `<iframe src="/viz/?case=<id>">`.
+- **Process model:** **shared single session** (few users) for now — one
+  `main.py --server --data $CFD_HOME` process. Per-session launcher is the later
+  productisation, not now.
+- **A1 done:** `?case=<name>` deep link — `_preselect()` + an aiohttp request
+  middleware in `_add_http_routes` (server-side; window.location is unreachable
+  from Vue expressions). Verify with the screenshot filename, see below.
+- **A2 pending (needs a live proxy, likely Niklas's env):** serving under the
+  `/viz/` base path behind nginx — the wslink client must open its WebSocket and
+  load assets relative to the mount.
+
+**Verifying A1 without a browser:** the PNG route names its file
+`foamviz-<case_name>-t<time>.png`. So: start `main.py --server --data data`,
+`GET /?case=s2`, then `GET /foamviz/screenshot.png` and read the
+`Content-Disposition` filename — it should contain `s2`.
+
+### Remaining open questions
+
+Related memories: `project_foamviz`, `project_openfoam_api` (Flask job-control
+API on :5001) and `project_iceopenfoam` (EQUA's OpenFOAM-13 extension libs).
 
 1. **Which backend, exactly?** The Flask job-control API, ICEOpenFOAM, or the
    IDA ICE client itself? That decides whether FoamViz is a service the API

@@ -53,6 +53,14 @@ trame pins no VTK version of its own. This app is verified on both 9.3.1 and
 case is anything containing `system/controlDict`. The bundled demo lives in
 `data/hotRoom`.
 
+### Deep-linking a case
+
+Append `?case=<name>` to the URL to open a specific case directly, e.g.
+`http://localhost:8080/?case=hotRoom` — `<name>` is the case directory name as
+listed in the drawer. This is what lets a host application (the CFD backend)
+embed the viewer for one case via an `<iframe>`. It is handled server-side and,
+because the session is shared, it sets the one shared scene.
+
 ## What it does
 
 | Control group | What you get |

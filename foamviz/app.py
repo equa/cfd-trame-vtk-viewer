@@ -268,6 +268,12 @@ class FoamViz:
         if self.case is None or case_name != self.case.name:
             self.load_case(case_name)
 
+    def _preselect(self, name):
+        """Load a case by name if known and not already shown — the hook for the
+        ``/viz/?case=<name>`` deep link (see :meth:`_add_http_routes`)."""
+        if name and name in self.case_paths and (self.case is None or name != self.case.name):
+            self.load_case(name)
+
     @change("time_index")
     def _on_time(self, time_index, **_):
         if self._loading or self.case is None:
@@ -386,6 +392,22 @@ class FoamViz:
             )
 
         wslink_server.app.router.add_get(SHOT_ROUTE, handler)
+
+        # Deep link: /viz/?case=<name> preselects a case, so the CFD backend can
+        # open a specific case directly. Done server-side (a request middleware)
+        # rather than client JS, because Vue template expressions cannot read
+        # window.location (see CLAUDE.md). This suits the shared-session model:
+        # one HTTP signal sets the one shared scene. Scheduled after the response
+        # so the page returns before the (blocking) case load runs.
+        @web.middleware
+        async def preselect_case(request, next_handler):
+            response = await next_handler(request)
+            name = request.query.get("case")
+            if name:
+                asyncio.get_running_loop().call_soon(self._preselect, name)
+            return response
+
+        wslink_server.app.middlewares.append(preselect_case)
 
     # ------------------------------------------------------------------- UI
 
