@@ -1,0 +1,29 @@
+# Rebuildable: pip install -r requirements.txt
+.venv/
+__pycache__/
+*.pyc
+
+# --- data/ ------------------------------------------------------------------
+# data/ is a working directory: point --data at whatever you like, including
+# symlinks to real cases elsewhere on the machine. None of that belongs in this
+# repo, so everything here is ignored by default and the bundled demo case is
+# re-included explicitly.
+data/*
+!data/hotRoom/
+
+# Of the demo case, version only the *definition*; `data/hotRoom/Allrun`
+# regenerates the rest (see CLAUDE.md "Demo data").
+data/hotRoom/[0-9]*/
+!data/hotRoom/0/
+# 0/ is initial conditions, but 0/T is written by setFields from 0/T.orig.
+data/hotRoom/0/T
+# Written by blockMesh.
+data/hotRoom/constant/polyMesh/
+data/hotRoom/log.*
+data/hotRoom/run.log
+data/hotRoom/*.foam
+data/hotRoom/postProcessing/
+data/hotRoom/processor*/
+
+# Screenshot output from tests/browser_check.py
+/shots/
