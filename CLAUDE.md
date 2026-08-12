@@ -47,7 +47,14 @@ assertions need updating — the checks are deliberately concrete.
 
 ## Environment
 
-- venv at `.venv`. Python 3.12, Ubuntu 24.04 container, **no root, no sudo**.
+- **Persistent venv at `/home/node/.venvs/foamviz`** (survives workspace
+  respawns — `/home/node` is a persistent volume, `/workspace` is not). Built
+  from this repo's package set with `vtk-osmesa` 9.3.1 (no system Mesa here).
+  Use it to actually run things:
+  `/home/node/.venvs/foamviz/bin/python tests/test_pipeline.py` (29 checks),
+  or a headless app smoke `... -c "from foamviz.app import FoamViz; FoamViz('data/hotRoom')"`.
+  A project-local `.venv` (763 MB) may also exist but is wiped on respawn.
+- Python 3.12, Ubuntu 24.04 container, **no root, no sudo**.
 - `render_window.GetClassName()` should report `vtkOSOpenGLRenderWindow`.
 
 ### VTK packaging — checked 2026-08-11, don't re-derive
@@ -222,15 +229,15 @@ API on :5001) and `project_iceopenfoam` (EQUA's OpenFOAM-13 extension libs).
    but they address OpenFOAM `cellZones`, which is a different question and not
    one that is being asked. An earlier version of these notes had this wrong and
    called it the top integration gap; it is not.
-5. **Decomposed cases — addressed (UNTESTED).** `case.py` now picks
-   `vtkPOpenFOAMReader` in `DECOMPOSED_CASE` mode when `_is_decomposed()` finds
-   the newest time only in `processor*` (mirrors backend `time_in == 'parallel'`;
-   detected from the filesystem, not the API, to keep cfd-viz decoupled).
-   `vtkPOpenFOAMReader` is a `vtkOpenFOAMReader` subclass, so the rest is
-   unchanged. **Verify in a real env:** that `vtk.vtkPOpenFOAMReader` exists in
-   the wheel and reads decomposed dirs serially (no MPI controller); the drawer
-   caption shows "· decomposed" when active. Alternative signal if wanted:
-   GET the backend `/api/caseinfo` `time_in`/`n_procs`.
+5. **Decomposed cases — done & VERIFIED.** `case.py` picks `vtkPOpenFOAMReader`
+   in `DECOMPOSED_CASE` mode when `_is_decomposed()` finds the newest time only
+   in `processor*` (mirrors backend `time_in == 'parallel'`; detected from the
+   filesystem, not the API, to keep cfd-viz decoupled). It is a
+   `vtkOpenFOAMReader` subclass, so the rest is unchanged. Verified with the
+   persistent venv on a real decomposePar'd hotRoom (root time 0, processor0 at
+   1730): detection True, `vtkPOpenFOAMReader` present in the wheel, reads all
+   processor dirs serially → 32 000 global cells, all fields. Drawer caption
+   shows "· decomposed" when active.
 6. **Render mode default.** Settled enough for now: Niklas reports client-side
    (vtk.js) rendering is "impressive already" at 12 M cells, so default to
    `local` and treat server mode as the fallback for GPU-less clients rather
