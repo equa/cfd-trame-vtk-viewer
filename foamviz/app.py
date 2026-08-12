@@ -421,21 +421,32 @@ class FoamViz:
                 self.state.time_index = nxt
             await asyncio.sleep(0.35)
 
-    def _refresh_times(self):
-        """Re-read the case's time list (steps written during a running solve are
-        not noticed otherwise) and jump to the latest, re-rendering it."""
+    def _refresh_times(self, force=False):
+        """Re-scan for time steps written during a running solve. Cheap when
+        nothing changed: it re-reads only the time list and updates the slider
+        bounds. The blocking mesh re-read (and jump to the newest step) happens
+        only when a newer step appeared, or when ``force`` (the refresh button).
+
+        Reopening the viewer uses ``force=False``, so several tabs opening the
+        shared session at once don't each trigger a full reload that freezes the
+        single event loop (a likely cause of intermittent 502s under nginx)."""
         if self.case is None:
             return
-        self._loading = True
+        prev_latest = self.case.times[-1]
         times = self.case.refresh_times()
         idx = len(times) - 1
-        self.case.load(times[idx], self.state.selected_patches)
+        with self.state:
+            self.state.time_values = times
+            self.state.n_times = len(times)
+        if not (force or times[-1] != prev_latest):
+            return  # nothing new — no blocking mesh read
+
+        self._loading = True
+        self.case.load(times[idx], self.state.selected_patches, force=force)
         self.pipeline.update_data()
         self._push_field_lists()  # a continued run may have added fields
         self.state.update(
             {
-                "time_values": times,
-                "n_times": len(times),
                 "time_index": idx,
                 "time_label": _fmt_time(times[idx]),
                 "case_info": self._case_info_text(),  # after load: fresh n_cells
@@ -448,7 +459,7 @@ class FoamViz:
 
     @controller.set("refresh_times")
     def refresh_times(self):
-        self._refresh_times()
+        self._refresh_times(force=True)
 
     def _add_http_routes(self, wslink_server):
         """Serve a freshly rendered PNG at :data:`SHOT_ROUTE`.

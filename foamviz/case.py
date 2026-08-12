@@ -130,14 +130,13 @@ class FoamCase:
         """Re-scan the case for time directories written since it was opened.
 
         vtkOpenFOAMReader reads the time list once (at UpdateInformation) and
-        never notices new steps, so the surest refresh is a fresh reader — cheap,
-        since the mesh is only read on the next UpdateTimeStep. Also invalidates
-        the load cache so the current step is re-read from disk."""
+        never notices new steps, so the surest refresh is a fresh reader. Cheap:
+        only the time list is re-read here, not the mesh. The load cache is kept,
+        so re-opening an unchanged case costs nothing — the caller decides whether
+        a mesh reload is actually needed."""
         self.reader = self._open_reader()
         self.times = self._read_times()
         self.patches = self._read_patches()
-        self._loaded_time = None
-        self._loaded_patches = None
         return self.times
 
     def _read_times(self):
@@ -156,10 +155,12 @@ class FoamCase:
 
     # -- loading ----------------------------------------------------------
 
-    def load(self, time, patches=None):
-        """Read one time step. Returns True if anything was actually re-read."""
+    def load(self, time, patches=None, force=False):
+        """Read one time step. Returns True if anything was actually re-read.
+        ``force`` re-reads even if the same time/patches are already loaded (the
+        refresh button, in case the step was overwritten in place)."""
         patches = list(patches if patches is not None else self.patches)
-        if self._loaded_time == time and self._loaded_patches == patches:
+        if not force and self._loaded_time == time and self._loaded_patches == patches:
             return False
 
         self.reader.SetPatchArrayStatus(INTERNAL_MESH, 1)
