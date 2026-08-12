@@ -15,6 +15,7 @@ Because the colour scalars are baked into a real array by the pipeline (see
 """
 
 import asyncio
+import logging
 import math
 import tempfile
 from pathlib import Path
@@ -29,6 +30,8 @@ from trame.widgets import vuetify3 as v3
 from . import colors
 from .case import FoamCase, find_cases
 from .pipeline import FoamPipeline
+
+log = logging.getLogger("foamviz")
 
 SHOT_ROUTE = "/foamviz/screenshot.png"
 
@@ -184,6 +187,9 @@ class FoamViz:
         self._loading = False
         self._rescale()
         self.update_scene(reset_camera=True)
+        log.info("loaded case %s: %d cells, %d step(s)%s",
+                 name, self.case.n_cells(), len(self.case.times),
+                 " (decomposed)" if self.case.decomposed else "")
 
     def _case_info_text(self):
         """Drawer caption: cell count, steps, patches, and the reader mode
@@ -299,19 +305,28 @@ class FoamViz:
     def _preselect(self, name):
         """Load a case by name — the hook for the ``/viz/?case=<name>`` deep link
         (see :meth:`_add_http_routes`). Re-scans the case root first if the name
-        is unknown, so a case created after startup still resolves."""
-        if not name:
-            return
-        if name not in self.case_paths:
-            self._rescan_cases()
-        if name not in self.case_paths:
-            return
-        if self.case is None or name != self.case.name:
-            self.load_case(name)
-        else:
-            # Same case reopened — refresh its time list so steps written since
-            # the last open (e.g. more solve iterations) show up.
-            self._refresh_times()
+        is unknown, so a case created after startup still resolves. Runs in the
+        event loop via call_soon, so it swallows/logs its own errors rather than
+        taking the server down."""
+        try:
+            if not name:
+                return
+            if name not in self.case_paths:
+                self._rescan_cases()
+            if name not in self.case_paths:
+                log.warning("preselect: unknown case %r (have %s)",
+                            name, sorted(self.case_paths))
+                return
+            if self.case is None or name != self.case.name:
+                log.info("preselect: loading case %s", name)
+                self.load_case(name)
+            else:
+                # Same case reopened — refresh its time list so steps written
+                # since the last open (e.g. more solve iterations) show up.
+                log.info("preselect: refreshing times for %s", name)
+                self._refresh_times()
+        except Exception:
+            log.exception("preselect(%r) failed", name)
 
     @change("time_index")
     def _on_time(self, time_index, **_):

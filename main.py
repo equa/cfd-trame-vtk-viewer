@@ -5,6 +5,7 @@
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -12,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from foamviz.app import FoamViz
 from foamviz.case import find_cases
+
+log = logging.getLogger("foamviz")
 
 
 def main():
@@ -30,6 +33,14 @@ def main():
     )
     args = parser.parse_args()
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    # Trame serves over aiohttp; surface its request/error logs too.
+    logging.getLogger("aiohttp.access").setLevel(logging.INFO)
+    logging.getLogger("aiohttp.server").setLevel(logging.INFO)
+
     cases = find_cases(args.data)
     if not cases:
         msg = (
@@ -40,12 +51,15 @@ def main():
         # (--server) keeps running and discovers cases on demand as they appear.
         if not args.server:
             parser.error(msg)
-        print(f"FoamViz: {msg}; serving empty, will pick up cases as they appear")
+        log.warning("%s; serving empty, will pick up cases on demand", msg)
     else:
-        print(f"FoamViz: {len(cases)} case(s) under {args.data}")
-        for case in cases:
-            print(f"  - {case.name}")
+        log.info(
+            "%d case(s) under %s: %s",
+            len(cases), args.data, ", ".join(c.name for c in cases),
+        )
 
+    log.info("serving on http://%s:%d/  (open_browser=%s)",
+             args.host, args.port, not args.server)
     app = FoamViz(args.data)
     app.start(port=args.port, host=args.host, open_browser=not args.server)
 
