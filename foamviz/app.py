@@ -195,6 +195,14 @@ class FoamViz:
             f"{len(c.patches)} patches{mode}"
         )
 
+    def _push_field_lists(self):
+        """Refresh the field/vector selectors from the loaded step's actual
+        arrays. OpenFOAM fields can appear in later time steps (e.g. a species
+        added mid-run), so the dropdowns must be rebuilt after every load — not
+        only when the case is first opened."""
+        self.state.field_items = sorted(self.case.fields)
+        self.state.vector_items = self.case.vector_fields
+
     # --------------------------------------------------------------- scene
 
     def update_scene(self, reset_camera=False):
@@ -314,6 +322,7 @@ class FoamViz:
         self.state.time_label = _fmt_time(time)
         if self.case.load(time, self.state.selected_patches):
             self.pipeline.update_data()
+            self._push_field_lists()  # fields can differ between time steps
             if self.state.auto_range:
                 self._rescale()
         self.update_scene()
@@ -407,6 +416,7 @@ class FoamViz:
         idx = len(times) - 1
         self.case.load(times[idx], self.state.selected_patches)
         self.pipeline.update_data()
+        self._push_field_lists()  # a continued run may have added fields
         self.state.update(
             {
                 "time_values": times,

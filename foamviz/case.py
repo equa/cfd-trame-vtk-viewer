@@ -86,8 +86,8 @@ class FoamCase:
         # need point data, and it makes the surface colouring smooth.
         reader.SetCreateCellToPoint(1)
         reader.SetSkipZeroTime(0)
-        reader.EnableAllCellArrays()
-        reader.UpdateInformation()
+        reader.UpdateInformation()    # discover the time steps and available arrays
+        reader.EnableAllCellArrays()  # then enable everything that was discovered
         return reader
 
     def _make_reader(self):
