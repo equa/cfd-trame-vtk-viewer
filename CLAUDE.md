@@ -222,9 +222,15 @@ API on :5001) and `project_iceopenfoam` (EQUA's OpenFOAM-13 extension libs).
    but they address OpenFOAM `cellZones`, which is a different question and not
    one that is being asked. An earlier version of these notes had this wrong and
    called it the top integration gap; it is not.
-5. **Decomposed cases.** Only reconstructed cases are read. The backend runs
-   `N_PROC 8`, so `processor*` directories will exist — needs either
-   `reconstructPar` first or `vtkPOpenFOAMReader`.
+5. **Decomposed cases — addressed (UNTESTED).** `case.py` now picks
+   `vtkPOpenFOAMReader` in `DECOMPOSED_CASE` mode when `_is_decomposed()` finds
+   the newest time only in `processor*` (mirrors backend `time_in == 'parallel'`;
+   detected from the filesystem, not the API, to keep cfd-viz decoupled).
+   `vtkPOpenFOAMReader` is a `vtkOpenFOAMReader` subclass, so the rest is
+   unchanged. **Verify in a real env:** that `vtk.vtkPOpenFOAMReader` exists in
+   the wheel and reads decomposed dirs serially (no MPI controller); the drawer
+   caption shows "· decomposed" when active. Alternative signal if wanted:
+   GET the backend `/api/caseinfo` `time_in`/`n_procs`.
 6. **Render mode default.** Settled enough for now: Niklas reports client-side
    (vtk.js) rendering is "impressive already" at 12 M cells, so default to
    `local` and treat server mode as the fallback for GPU-less clients rather

@@ -62,6 +62,7 @@ class FoamCase:
         self.name = self.case_dir.name
         self.foam_file = ensure_foam_stub(self.case_dir)
 
+        self.decomposed = False  # set by _make_reader() from the case layout
         self.reader = self._open_reader()
         self.times = self._read_times()
         self.patches = self._read_patches()
@@ -79,7 +80,7 @@ class FoamCase:
     # -- reader / metadata ------------------------------------------------
 
     def _open_reader(self):
-        reader = vtk.vtkOpenFOAMReader()
+        reader = self._make_reader()
         reader.SetFileName(str(self.foam_file))
         # Interpolate cell values to points: contouring and stream tracing both
         # need point data, and it makes the surface colouring smooth.
@@ -88,6 +89,42 @@ class FoamCase:
         reader.EnableAllCellArrays()
         reader.UpdateInformation()
         return reader
+
+    def _make_reader(self):
+        """Pick the reader for the case's current state: the serial
+        vtkOpenFOAMReader normally, or the parallel vtkPOpenFOAMReader in
+        decomposed mode when the newest time only exists in processor* dirs —
+        i.e. what the backend reports as case_info.time_in == 'parallel'.
+        vtkPOpenFOAMReader is a vtkOpenFOAMReader subclass, so the rest of this
+        class is unchanged; it reads all processor* dirs on a single process."""
+        self.decomposed = self._is_decomposed()
+        if self.decomposed:
+            reader = vtk.vtkPOpenFOAMReader()
+            reader.SetCaseType(vtk.vtkPOpenFOAMReader.DECOMPOSED_CASE)
+            return reader
+        return vtk.vtkOpenFOAMReader()
+
+    def _is_decomposed(self):
+        """True when the newest available time lives only in (or later in) the
+        processor* directories rather than reconstructed in the case root."""
+
+        def latest(dirs):
+            times = []
+            for d in dirs:
+                try:
+                    times.append(float(d.name))
+                except ValueError:
+                    pass  # constant, system, processor*, geometry, ...
+            return max(times) if times else None
+
+        proc0 = self.case_dir / "processor0"
+        if not proc0.is_dir():
+            return False
+        proc_latest = latest(p for p in proc0.iterdir() if p.is_dir())
+        if proc_latest is None:
+            return False
+        root_latest = latest(p for p in self.case_dir.iterdir() if p.is_dir())
+        return root_latest is None or proc_latest > root_latest
 
     def refresh_times(self):
         """Re-scan the case for time directories written since it was opened.

@@ -176,11 +176,7 @@ class FoamViz:
                 "vector_field": self.pipeline.vector_field,
                 "patch_items": self.case.patches,
                 "selected_patches": list(self.case.patches),
-                "case_info": (
-                    f"{self.case.n_cells():,} cells · "
-                    f"{len(self.case.times)} time steps · "
-                    f"{len(self.case.patches)} patches"
-                ),
+                "case_info": self._case_info_text(),
             }
         )
 
@@ -188,6 +184,16 @@ class FoamViz:
         self._loading = False
         self._rescale()
         self.update_scene(reset_camera=True)
+
+    def _case_info_text(self):
+        """Drawer caption: cell count, steps, patches, and the reader mode
+        (``decomposed`` when reading processor* dirs via vtkPOpenFOAMReader)."""
+        c = self.case
+        mode = " · decomposed" if getattr(c, "decomposed", False) else ""
+        return (
+            f"{c.n_cells():,} cells · {len(c.times)} time steps · "
+            f"{len(c.patches)} patches{mode}"
+        )
 
     # --------------------------------------------------------------- scene
 
@@ -399,16 +405,17 @@ class FoamViz:
         self._loading = True
         times = self.case.refresh_times()
         idx = len(times) - 1
+        self.case.load(times[idx], self.state.selected_patches)
+        self.pipeline.update_data()
         self.state.update(
             {
                 "time_values": times,
                 "n_times": len(times),
                 "time_index": idx,
                 "time_label": _fmt_time(times[idx]),
+                "case_info": self._case_info_text(),  # after load: fresh n_cells
             }
         )
-        self.case.load(times[idx], self.state.selected_patches)
-        self.pipeline.update_data()
         self._loading = False
         if self.state.auto_range:
             self._rescale()
