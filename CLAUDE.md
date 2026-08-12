@@ -107,6 +107,11 @@ assertions need updating — the checks are deliberately concrete.
   therefore uses a real aiohttp route registered through
   `ctrl.on_server_bind` — see `_add_http_routes`. Do not "fix" it back into a
   `data:` URI: Chromium refuses a scripted click on a multi-megabyte data URL.
+- **An aiohttp `@web.middleware`'s second parameter must be named `handler`.**
+  aiohttp calls middlewares as `partial(mw, handler=next)` — by keyword — so any
+  other name (e.g. `next_handler`) raises `got an unexpected keyword argument
+  'handler'` on *every* request and 500s the whole app. Bit the `?case=`
+  preselect middleware in `_add_http_routes`.
 - `html.A` silently drops a `ref=` kwarg.
 - `trame-vtk`'s client POSTs `/paraview/` on startup and gets a harmless 405.
   Expected; filtered in `tests/browser_check.py`.

@@ -418,9 +418,11 @@ class FoamViz:
         # window.location (see CLAUDE.md). This suits the shared-session model:
         # one HTTP signal sets the one shared scene. Scheduled after the response
         # so the page returns before the (blocking) case load runs.
+        # NB: the second parameter must be named `handler` — aiohttp invokes
+        # middlewares as partial(mw, handler=next_handler), i.e. by keyword.
         @web.middleware
-        async def preselect_case(request, next_handler):
-            response = await next_handler(request)
+        async def preselect_case(request, handler):
+            response = await handler(request)
             name = request.query.get("case")
             if name:
                 asyncio.get_running_loop().call_soon(self._preselect, name)
