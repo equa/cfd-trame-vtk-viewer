@@ -290,8 +290,14 @@ class FoamViz:
             return
         if name not in self.case_paths:
             self._rescan_cases()
-        if name in self.case_paths and (self.case is None or name != self.case.name):
+        if name not in self.case_paths:
+            return
+        if self.case is None or name != self.case.name:
             self.load_case(name)
+        else:
+            # Same case reopened — refresh its time list so steps written since
+            # the last open (e.g. more solve iterations) show up.
+            self._refresh_times()
 
     @change("time_index")
     def _on_time(self, time_index, **_):
@@ -385,6 +391,33 @@ class FoamViz:
                 self.state.time_index = nxt
             await asyncio.sleep(0.35)
 
+    def _refresh_times(self):
+        """Re-read the case's time list (steps written during a running solve are
+        not noticed otherwise) and jump to the latest, re-rendering it."""
+        if self.case is None:
+            return
+        self._loading = True
+        times = self.case.refresh_times()
+        idx = len(times) - 1
+        self.state.update(
+            {
+                "time_values": times,
+                "n_times": len(times),
+                "time_index": idx,
+                "time_label": _fmt_time(times[idx]),
+            }
+        )
+        self.case.load(times[idx], self.state.selected_patches)
+        self.pipeline.update_data()
+        self._loading = False
+        if self.state.auto_range:
+            self._rescale()
+        self.update_scene()
+
+    @controller.set("refresh_times")
+    def refresh_times(self):
+        self._refresh_times()
+
     def _add_http_routes(self, wslink_server):
         """Serve a freshly rendered PNG at :data:`SHOT_ROUTE`.
 
@@ -474,6 +507,15 @@ class FoamViz:
                 "t = {{ time_label }}",
                 classes="text-caption text-medium-emphasis mx-2 js-time-label",
                 style="min-width: 92px",
+            )
+            # Re-scan for time steps written since the case was opened (a solve
+            # keeps writing them) and jump to the newest.
+            v3.VBtn(
+                icon="mdi-refresh",
+                variant="text",
+                density="comfortable",
+                click=self.ctrl.refresh_times,
+                classes="js-refresh-times",
             )
 
             v3.VDivider(vertical=True, classes="mx-2")

@@ -62,15 +62,7 @@ class FoamCase:
         self.name = self.case_dir.name
         self.foam_file = ensure_foam_stub(self.case_dir)
 
-        self.reader = vtk.vtkOpenFOAMReader()
-        self.reader.SetFileName(str(self.foam_file))
-        # Interpolate cell values to points: contouring and stream tracing both
-        # need point data, and it makes the surface colouring smooth.
-        self.reader.SetCreateCellToPoint(1)
-        self.reader.SetSkipZeroTime(0)
-        self.reader.EnableAllCellArrays()
-        self.reader.UpdateInformation()
-
+        self.reader = self._open_reader()
         self.times = self._read_times()
         self.patches = self._read_patches()
 
@@ -84,7 +76,32 @@ class FoamCase:
         self.internal = None  # vtkUnstructuredGrid
         self.boundary = {}  # patch name -> vtkPolyData
 
-    # -- metadata ---------------------------------------------------------
+    # -- reader / metadata ------------------------------------------------
+
+    def _open_reader(self):
+        reader = vtk.vtkOpenFOAMReader()
+        reader.SetFileName(str(self.foam_file))
+        # Interpolate cell values to points: contouring and stream tracing both
+        # need point data, and it makes the surface colouring smooth.
+        reader.SetCreateCellToPoint(1)
+        reader.SetSkipZeroTime(0)
+        reader.EnableAllCellArrays()
+        reader.UpdateInformation()
+        return reader
+
+    def refresh_times(self):
+        """Re-scan the case for time directories written since it was opened.
+
+        vtkOpenFOAMReader reads the time list once (at UpdateInformation) and
+        never notices new steps, so the surest refresh is a fresh reader — cheap,
+        since the mesh is only read on the next UpdateTimeStep. Also invalidates
+        the load cache so the current step is re-read from disk."""
+        self.reader = self._open_reader()
+        self.times = self._read_times()
+        self.patches = self._read_patches()
+        self._loaded_time = None
+        self._loaded_patches = None
+        return self.times
 
     def _read_times(self):
         tv = self.reader.GetTimeValues()
