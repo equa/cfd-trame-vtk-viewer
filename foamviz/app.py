@@ -61,6 +61,7 @@ class FoamViz:
         self.case = None
         self.case_root = case_root  # kept so cases can be re-scanned on demand
         self._player_task = None
+        self._busy_count = 0  # >0 while a heavy scene update is running
         self.ctrl.on_server_bind.add(self._add_http_routes)
 
         # Guards the change handlers while we set many state variables at once
@@ -102,6 +103,7 @@ class FoamViz:
                 "n_times": 1,
                 "playing": False,
                 "case_info": "",
+                "busy": False,
                 # colouring
                 "field_items": [],
                 "color_field": None,
@@ -284,6 +286,39 @@ class FoamViz:
         self.state.legend_ticks = _format_ticks(values)
         self.state.legend_title = f"{label} {unit}".strip()
 
+    # ------------------------------------------------------- busy overlay
+
+    def _busy_call(self, work):
+        """Raise the busy overlay, then run `work` (a blocking scene rebuild) on
+        the NEXT event-loop tick. The tick matters: trame is single-threaded, so
+        a heavy VTK update freezes the loop; scheduling it after the busy flush
+        lets the browser receive busy=True and put up the overlay — which
+        captures further widget clicks — *before* the freeze, so edits don't
+        queue up behind a long operation. Cheap, live edits (opacity, colour map,
+        tube width) skip this and stay synchronous."""
+        if self._loading or self.case is None:
+            return
+        self._busy_count += 1
+        with self.state:
+            self.state.busy = True
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._run(work)  # no loop (e.g. at construction) — just run it
+            return
+        loop.call_soon(self._run, work)
+
+    def _run(self, work):
+        try:
+            work()
+        except Exception:
+            log.exception("scene update failed")
+        finally:
+            self._busy_count = max(0, self._busy_count - 1)
+            if self._busy_count == 0:
+                with self.state:
+                    self.state.busy = False
+
     # ------------------------------------------------------- state handlers
 
     @change("case_name")
@@ -333,8 +368,11 @@ class FoamViz:
         if self._loading or self.case is None:
             return
         idx = max(0, min(int(time_index), len(self.case.times) - 1))
+        self.state.time_label = _fmt_time(self.case.times[idx])
+        self._busy_call(lambda: self._do_time(idx))  # loading a step is heavy
+
+    def _do_time(self, idx):
         time = self.case.times[idx]
-        self.state.time_label = _fmt_time(time)
         if self.case.load(time, self.state.selected_patches):
             self.pipeline.update_data()
             self._push_field_lists()  # fields can differ between time steps
@@ -344,8 +382,9 @@ class FoamViz:
 
     @change("selected_patches")
     def _on_patches(self, **_):
-        if self._loading or self.case is None:
-            return
+        self._busy_call(self._do_patches)
+
+    def _do_patches(self):
         self.case.load(self.case.times[int(self.state.time_index)], self.state.selected_patches)
         self.pipeline.update_data()
         self.update_scene()
@@ -357,46 +396,56 @@ class FoamViz:
         self.state.component_enabled = self.case.fields.get(self.state.color_field) == 3
         if not self.state.component_enabled:
             self.state.color_component = "magnitude"
+        self._busy_call(self._do_field)
+
+    def _do_field(self):
         if self.state.auto_range:
             self._rescale()
         self.update_scene()
 
+    # Heavy: recompute geometry (recut/clip, contour/streamline/glyph filters).
     @change(
-        "preset",
-        "range_min",
-        "range_max",
         "plane_axis",
         "plane_position",
-        "surface_visible",
-        "surface_colored",
-        "surface_opacity",
-        "surface_edges",
         "surface_clip",
-        "slice_visible",
-        "slice_edges",
         "contour_visible",
         "contour_count",
-        "contour_opacity",
         "stream_visible",
         "stream_seeds",
-        "stream_radius",
         "stream_length",
         "vector_field",
         "glyph_visible",
         "glyph_source",
         "glyph_count",
-        "glyph_scale",
         "glyph_scale_by",
     )
-    def _on_appearance(self, **_):
+    def _on_heavy(self, **_):
+        self._busy_call(self.update_scene)
+
+    # Cheap: render-only tweaks of already-computed geometry — stay live, no
+    # overlay (they finish in a frame).
+    @change(
+        "preset",
+        "range_min",
+        "range_max",
+        "surface_visible",
+        "surface_colored",
+        "surface_opacity",
+        "surface_edges",
+        "slice_visible",
+        "slice_edges",
+        "contour_opacity",
+        "stream_radius",
+        "glyph_scale",
+    )
+    def _on_cheap(self, **_):
         self.update_scene()
 
     # ------------------------------------------------------------ controller
 
     @controller.set("rescale")
     def rescale(self):
-        self._rescale()
-        self.update_scene()
+        self._busy_call(self._do_field)
 
     @controller.set("set_view")
     def set_view(self, direction):
@@ -522,6 +571,7 @@ class FoamViz:
             self._toolbar()
             self._drawer()
             self._content()
+            self._busy_overlay()
 
     def _toolbar(self):
         with self.ui.toolbar:
@@ -819,6 +869,22 @@ class FoamViz:
             ):
                 v3.VBtn("Client", value="local", size="x-small")
                 v3.VBtn("Server", value="remote", size="x-small")
+
+    def _busy_overlay(self):
+        # Full-screen overlay shown while a heavy update runs; its scrim captures
+        # clicks (persistent), so the drawer/toolbar can't be operated until the
+        # operation finishes — no queued edits. There is no reliable way to abort
+        # a running VTK filter (even ParaView can't), so this prevents piling
+        # more work on rather than trying to interrupt it.
+        with v3.VOverlay(
+            v_model=("busy",),
+            persistent=True,
+            classes="align-center justify-center",
+            style="backdrop-filter: blur(2px)",
+        ):
+            with html.Div(classes="d-flex flex-column align-center"):
+                v3.VProgressCircular(indeterminate=True, size=64, width=5, color="primary")
+                html.Div("Working…", classes="mt-4 text-subtitle-1")
 
     def start(self, **kwargs):
         self.server.start(**kwargs)
