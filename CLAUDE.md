@@ -316,9 +316,10 @@ All of the below shipped (see "Widget re-arrangement — DONE" implementation no
   **Done 2026-08-14** — "True cell values" switch in the Colour panel
   (`use_cell_data`); bakes a cell `FoamVizColor` and switches the surface/slice
   mapper association. Contour/streamlines/glyphs stay on point data.
-- Slice-plane visualisation: when the mesh is shown, switch to a "crinkle slice"
-  — show the whole layer of intersected cells with the mesh, i.e. the true mesh,
-  not a triangulated slice.
+- ~~Slice-plane visualisation: when the mesh is shown, switch to a "crinkle
+  slice".~~ **Done 2026-08-15** — the "Mesh (crinkle)" switch on the Cut plane
+  tool feeds the slice from `vtk3DLinearGridCrinkleExtractor` instead of the
+  cutter (see the implementation note below).
 
 ## To-do — implementation notes (Claude)
 
@@ -394,18 +395,24 @@ rather than editing each slider; keep the cheap sliders live.
   boundary patches, and the cutter output. Contour/streamlines/glyphs keep
   reading the point array. (Note: auto-range still samples point data — a cell
   extreme can slightly exceed it; not worth special-casing.)
-- **Crinkle slice:** the biggest lift. The slice is a `vtkCutter` (triangulated
-  planar cut); a crinkle slice keeps whole cells the plane passes through.
-  Implement by evaluating the plane's signed distance at each cell's points and
-  extracting the cells with a sign change (straddling), e.g. via
-  `vtkExtractGeometry` with the plane implicit function, then draw with edges.
-  Gate it on "mesh shown" (`slice_edges`). Standalone; do it last.
+- ~~**Crinkle slice**~~ — **Done 2026-08-15.** Not home-brewn: VTK ships the
+  purpose-built `vtk3DLinearGridCrinkleExtractor` (threaded, meant for large
+  grids — ~1 ms on the demo, the right choice for the 12 M case). It shares the
+  cutter's `vtkPlane`, so the position slider drives both; a `vtkGeometryFilter`
+  turns its unstructured output into polydata for the shared slice mapper, and
+  `update_slice` swaps the mapper's input to it when `slice_edges` is on. It
+  needs a 3D *linear* grid — fine, the reader decomposes polyhedra by default
+  (demo mesh is all hexes). `slice_edges` moved to the heavy/overlay handler
+  since it now does real extraction. (`vtkExtractGeometry` +
+  `ExtractOnlyBoundaryCells` was the general-cell-type fallback considered — not
+  needed here, and slower.)
 
 ### Suggested order
 
 1. ~~**Slider debounce**~~ — **done** (core; plane outline + numeric XYZ remain).
 2. ~~**Cull-front-face** and **point/cell toggle**~~ — **done 2026-08-14**.
 3. ~~**Widget re-arrangement** (+ banded colouring)~~ — **done 2026-08-15**.
-4. **Crinkle slice** — self-contained but the largest single feature. **← next**
+4. ~~**Crinkle slice**~~ — **done 2026-08-15**.
 5. Slider refinements: plane outline during drag, numeric XYZ plane position.
+   **← next** (the only backlog items left)
  

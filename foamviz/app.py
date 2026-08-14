@@ -454,6 +454,9 @@ class FoamViz:
         "glyph_source",
         "glyph_count",
         "glyph_scale_by",
+        # showing the mesh switches the slice to a crinkle extraction (whole
+        # cells) — real geometry work, so it belongs behind the busy overlay
+        "slice_edges",
     )
     def _on_heavy(self, **_):
         self._busy_call(self.update_scene)
@@ -472,7 +475,6 @@ class FoamViz:
         "surface_edges",
         "surface_cull",
         "slice_visible",
-        "slice_edges",
         "contour_opacity",
         "stream_radius",
         "glyph_scale",
@@ -787,7 +789,9 @@ class FoamViz:
             _slider("plane_position", "Position", 0.0, 1.0, 0.005, debounce=True)
             v3.VDivider(classes="my-3")
             _switch("slice_visible", "Show slice")
-            _switch("slice_edges", "Mesh edges")
+            # With the mesh on, the slice becomes a crinkle slice: whole cells
+            # the plane passes through, i.e. the true mesh, not a flat cut.
+            _switch("slice_edges", "Mesh (crinkle)")
 
     def _tool_boundary(self, title, icon):
         """Room shell (the boundary surface) + which patches are read."""

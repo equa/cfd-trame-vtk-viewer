@@ -81,6 +81,20 @@ class FoamPipeline:
         # --- slice -------------------------------------------------------
         self.cutter = vtk.vtkCutter()
         self.cutter.SetCutFunction(vtk.vtkPlane())
+        # Crinkle slice: the whole cells the plane passes through (the true mesh
+        # layer) rather than a flat triangulated cut. vtk3DLinearGridCrinkleExtractor
+        # is VTK's purpose-built, threaded crinkle filter -- fast enough for the
+        # big case; it needs a 3D *linear* grid, which the reader gives us (it
+        # decomposes polyhedra by default). It shares the cutter's plane, so the
+        # position slider moves both. vtkGeometryFilter turns its unstructured
+        # output into polydata for the shared slice mapper.
+        self.crinkle = vtk.vtk3DLinearGridCrinkleExtractor()
+        self.crinkle.SetImplicitFunction(self.cutter.GetCutFunction())
+        self.crinkle.SetCopyCellData(True)
+        self.crinkle.SetCopyPointData(True)
+        self.crinkle_surface = vtk.vtkGeometryFilter()
+        self.crinkle_surface.SetInputConnection(self.crinkle.GetOutputPort())
+
         self.slice_actor, self.slice_mapper = self._make_actor()
         self.slice_mapper.SetInputConnection(self.cutter.GetOutputPort())
         # A cut plane is read quantitatively against the colour bar, so shading
@@ -288,6 +302,7 @@ class FoamPipeline:
             self.surface_input.AddInputData(vtk.vtkPolyData())
 
         self.cutter.SetInputData(case.internal)
+        self.crinkle.SetInputData(case.internal)
         self.contour.SetInputData(case.internal)
         self.tracer.SetInputData(case.internal)
         self.outline.SetInputData(case.internal)
@@ -389,6 +404,12 @@ class FoamPipeline:
     def update_slice(self, visible, edges):
         self.slice_actor.SetVisibility(1 if visible else 0)
         self._color_by_association(self.slice_mapper)
+        # Showing the mesh means showing the true cell layer (crinkle) rather
+        # than the flat triangulated cut -- otherwise "mesh edges" would draw the
+        # cutter's triangulation, which is not the real mesh.
+        self.slice_mapper.SetInputConnection(
+            self.crinkle_surface.GetOutputPort() if edges else self.cutter.GetOutputPort()
+        )
         prop = self.slice_actor.GetProperty()
         prop.SetEdgeVisibility(1 if edges else 0)
         prop.SetEdgeColor(0.2, 0.2, 0.24)

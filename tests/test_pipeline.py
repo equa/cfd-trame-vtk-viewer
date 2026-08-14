@@ -91,6 +91,14 @@ def main():
     check("slice has cells", pipe.cutter.GetOutput().GetNumberOfCells() > 1000,
           f"{pipe.cutter.GetOutput().GetNumberOfCells()} cells")
 
+    # crinkle slice: whole cells the plane passes through (the true mesh layer)
+    pipe.crinkle_surface.Update()
+    crink = pipe.crinkle_surface.GetOutput()
+    check("crinkle slice extracts a cell layer", crink.GetNumberOfCells() > 1000,
+          f"{crink.GetNumberOfCells()} faces")
+    check("crinkle carries the colour array",
+          crink.GetPointData().GetArray(COLOR_ARRAY) is not None)
+
     pipe.update_surface(True, True, 0.3, False, True, False)
     pipe.surface_clip.Update()
     clipped = pipe.surface_clip.GetOutput().GetNumberOfCells()
