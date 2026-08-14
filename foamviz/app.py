@@ -15,9 +15,12 @@ Because the colour scalars are baked into a real array by the pipeline (see
 """
 
 import asyncio
+import json
 import logging
 import math
+import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 
 from trame.app import get_server
@@ -117,6 +120,10 @@ class FoamViz:
                 "busy": False,
                 # which widget tool's controls the drawer is showing (see TOOLS)
                 "active_tool": "cutplane",
+                # "Add to case report" — caption for the next figure + a snackbar
+                "report_caption": "",
+                "report_msg": "",
+                "report_snack": False,
                 # colouring
                 "field_items": [],
                 "color_field": None,
@@ -580,6 +587,71 @@ class FoamViz:
         self._sync_plane_ui()  # reflect the applied coordinate on the slider
         self.update_scene()
 
+    # -- add to case report -------------------------------------------------
+
+    @controller.set("add_to_report")
+    def add_to_report(self):
+        """Snapshot the current scene into <case>/report/ as a self-contained
+        figure: an interactive .vtkjs, a .png poster (for print and while the
+        viewer loads), and a .json of the colouring so the report can redraw the
+        colour bar. Behind the busy overlay -- exporting a big scene takes a moment."""
+        if self.case is None:
+            return
+        self._busy_call(self._do_add_to_report)
+
+    def _do_add_to_report(self):
+        report_dir = self.case.case_dir / "report"
+        report_dir.mkdir(exist_ok=True)
+        stem = f"figure_{self._next_report_index(report_dir):02d}"
+
+        # Poster first: the scene exporter perturbs the render window, so grab the
+        # PNG before it runs (screenshot() re-renders to be safe regardless).
+        self.pipeline.screenshot(str(report_dir / f"{stem}.png"))
+
+        # .vtkjs -- the exporter writes a directory; zip it into one file.
+        tmp = Path(tempfile.mkdtemp(prefix="foamviz_scene_"))
+        try:
+            self.pipeline.write_vtkjs(tmp)
+            with zipfile.ZipFile(report_dir / f"{stem}.vtkjs", "w", zipfile.ZIP_DEFLATED) as z:
+                for f in tmp.rglob("*"):
+                    if f.is_file():
+                        z.write(f, f.relative_to(tmp))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        meta = {
+            "index": int(stem.split("_")[1]),
+            "caption": (self.state.report_caption or "").strip() or self._auto_caption(),
+            "case": self.case.name,
+            "field": self.state.color_field,
+            "component": self.state.color_component if self.state.component_enabled else None,
+            "range": [float(self.state.range_min), float(self.state.range_max)],
+            "preset": self.state.preset,
+            "n_colors": int(self.state.n_colors or 0),
+        }
+        (report_dir / f"{stem}.json").write_text(json.dumps(meta, indent=2))
+        log.info("added %s to case report at %s", stem, report_dir)
+
+        with self.state:
+            self.state.report_caption = ""
+            self.state.report_msg = f"Added {stem} to the case report"
+            self.state.report_snack = True
+
+    def _next_report_index(self, report_dir):
+        used = [int(p.stem.split("_")[1]) for p in report_dir.glob("figure_*.json")
+                if p.stem.split("_")[1].isdigit()]
+        return max(used, default=0) + 1
+
+    def _auto_caption(self):
+        """A caption from what is on screen, when the user did not type one."""
+        shown = [name for flag, name in (
+            (self.state.slice_visible, "slice"),
+            (self.state.contour_visible, "isosurfaces"),
+            (self.state.stream_visible, "streamlines"),
+            (self.state.glyph_visible, "arrows"),
+        ) if flag] or ["boundary"]
+        return f"{self.state.color_field or ''} — {', '.join(shown)}".strip(" —")
+
     @controller.set("set_view")
     def set_view(self, direction):
         self.pipeline.set_view(direction)
@@ -705,6 +777,8 @@ class FoamViz:
             self._drawer()
             self._content()
             self._busy_overlay()
+            with v3.VSnackbar(v_model=("report_snack", False), timeout=2500, color="success"):
+                html.Span("{{ report_msg }}")
 
     def _toolbar(self):
         with self.ui.toolbar:
@@ -739,6 +813,16 @@ class FoamViz:
                     variant="text",
                     density="comfortable",
                 )
+
+            # Snapshot the current scene into the case report (see add_to_report).
+            v3.VBtn(
+                "Report",
+                prepend_icon="mdi-image-plus",
+                size="small",
+                variant="tonal",
+                classes="ml-1 js-add-report",
+                click=self.ctrl.add_to_report,
+            )
 
     def _drawer(self):
         with self.ui.drawer:
@@ -986,6 +1070,9 @@ class FoamViz:
                 )
                 self.ctrl.view_update = view.update
                 self.ctrl.view_reset_camera = view.reset_camera
+                # Keep the server camera in step with the client's orbit, so a
+                # report figure (exported server-side) frames what the user set up.
+                view.push_remote_camera_on_end_interaction()
 
                 self._legend()
                 self._bottom_bar()

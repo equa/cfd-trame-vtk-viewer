@@ -274,6 +274,40 @@ Alternatives rejected during the original build: server-side throttle/debounce
 (still pays the round trip, feels laggy not stepped) and lowering default counts
 (treats the symptom).
 
+## Case-report figures — in progress (2026-08-16)
+
+Goal (with Niklas): build a scene, "Add to case report", and have it appear in
+the cfd-frontend case report — a **frozen** interactive snapshot (rotate/zoom, no
+toggles). The headline deliverable is a **single self-contained `.html` export**
+of the report with the scenes inlined (opens offline, no running services); the
+existing browser print-to-PDF stays (scenes show as their poster PNG there).
+
+Format decided: **vtk.js scene** (`.vtkjs`), not glTF — it is the same vtk.js
+renderer the client already uses, so the report looks identical to the live view
+(glTF risks PBR-shading the flat CFD field colours). Storage: **inside the case**,
+`<case>/report/` (Niklas confirmed cfd-viz has write access to `CFD_HOME`).
+
+**DONE — capture (this repo).** The toolbar "Report" button → `add_to_report`
+writes three files per figure into `<case>/report/`: `figure_NN.vtkjs` (the
+scene: `vtkJSONSceneExporter` output, zipped), `figure_NN.png` (poster/print),
+`figure_NN.json` (caption + field/component/range/preset/n_colors, so the report
+redraws the colour bar from `colors.py`). Caption comes from a state field or
+`_auto_caption()`. `push_remote_camera_on_end_interaction()` keeps the server
+camera synced to the client's orbit, so the export frames what the user set up.
+
+- **Trap:** `vtkJSONSceneExporter` leaves the render window in a state that
+  **segfaults** a subsequent `vtkWindowToImageFilter`. So capture the PNG
+  *before* the scene export, and `screenshot()` now calls `render_window.Render()`
+  first (also needed because, with no live client driving it, the window may be
+  unrendered during a headless export).
+
+**TODO — the rest (cfd-backend repo).** (2) backend route to list/serve a case's
+`report/` figures; (3) a Figures section in `frontend/src/pages/Report.jsx` (PNG
+in print, interactive vtk.js viewer on screen); (4) the single-file HTML export —
+assemble the React-rendered tables/charts + one inlined vtk.js viewer +
+base64-embedded scenes into a downloadable `.html` (client-side assembly reuses
+React's rendering; the viewer is one small vtk.js bundle inlined once).
+
 ## To-do list
 
 Things for future consideration and work, added by Niklas. Remove items when

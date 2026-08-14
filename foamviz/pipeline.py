@@ -538,8 +538,22 @@ class FoamPipeline:
         camera.SetFocalPoint(0, 0, 0)
         self.renderer.ResetCamera()
 
+    def write_vtkjs(self, directory):
+        """Export the current scene to a vtk.js scene *directory* (index.json +
+        binary data arrays + the lookup tables). Zipped, this is a ``.vtkjs``
+        the report embeds for interactive (rotate/zoom) viewing -- the same
+        vtk.js renderer the client uses, so it looks identical to the live view."""
+        exporter = vtk.vtkJSONSceneExporter()
+        exporter.SetRenderWindow(self.render_window)
+        exporter.SetFileName(str(directory))
+        exporter.Write()
+
     def screenshot(self, path, magnification=2):
         """Write a PNG of the current view at *magnification* times the size."""
+        # Ensure a current frame in the buffer: without a live client driving it
+        # (report export) the window may be unrendered, or left perturbed by the
+        # scene exporter -- either segfaults vtkWindowToImageFilter otherwise.
+        self.render_window.Render()
         window_to_image = vtk.vtkWindowToImageFilter()
         window_to_image.SetInput(self.render_window)
         window_to_image.SetScale(magnification)
