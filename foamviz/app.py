@@ -52,6 +52,17 @@ VIEW_BUTTONS = [
     ("Iso", "iso"),
 ]
 
+# The drawer's widget tools. One entry drives both the top-bar selector button
+# and the matching drawer section (built by ``_tool_<key>``), so the two can't
+# drift. Colouring is not here — it stays permanently visible above the tools.
+TOOLS = [
+    ("cutplane", "Cut plane", "mdi-square-outline"),
+    ("boundary", "Boundary", "mdi-cube-outline"),
+    ("contour", "Isosurfaces", "mdi-blur"),
+    ("stream", "Streamlines", "mdi-vector-polyline"),
+    ("glyph", "Arrows", "mdi-arrow-top-right"),
+]
+
 
 @TrameApp()
 class FoamViz:
@@ -104,6 +115,8 @@ class FoamViz:
                 "playing": False,
                 "case_info": "",
                 "busy": False,
+                # which widget tool's controls the drawer is showing (see TOOLS)
+                "active_tool": "cutplane",
                 # colouring
                 "field_items": [],
                 "color_field": None,
@@ -116,6 +129,8 @@ class FoamViz:
                 "legend_gradient": colors.css_gradient("coolwarm"),
                 "legend_ticks": [],
                 "legend_title": "",
+                # 0 = smooth colour map; >0 bands it into that many colours.
+                "n_colors": 0,
                 "auto_range": True,
                 # Off by default. It is the right tool when a tiny extreme
                 # region flattens the map, but it saturates everything above the
@@ -237,6 +252,7 @@ class FoamViz:
         if self.case.vector_field_available(s.vector_field):
             self.case.internal.GetPointData().SetActiveVectors(s.vector_field)
 
+        p.n_colors = int(s.n_colors or 0)
         p.set_preset(s.preset)
         p.set_color_range(float(s.range_min), float(s.range_max))
 
@@ -298,7 +314,9 @@ class FoamViz:
         label = self.state.color_field or ""
         if self.state.component_enabled:
             label += f" ({self.state.color_component})"
-        self.state.legend_gradient = colors.css_gradient(self.state.preset)
+        self.state.legend_gradient = colors.css_gradient(
+            self.state.preset, n_colors=int(self.state.n_colors or 0)
+        )
         # Top-to-bottom, matching the vertical gradient.
         values = [hi - (hi - lo) * i / 4 for i in range(5)]
         self.state.legend_ticks = _format_ticks(values)
@@ -446,6 +464,7 @@ class FoamViz:
         "preset",
         "range_min",
         "range_max",
+        "n_colors",
         "use_cell_data",
         "surface_visible",
         "surface_colored",
@@ -597,54 +616,21 @@ class FoamViz:
         with self.ui.toolbar:
             v3.VSpacer()
 
-            # --- time -------------------------------------------------------
-            v3.VBtn(
-                icon=("playing ? 'mdi-pause' : 'mdi-play'",),
-                variant="text",
+            # Widget-tool selector: picks which tool's controls the drawer shows
+            # (see TOOLS / _drawer). It only drives the side panel, not what's
+            # rendered -- each representation keeps its own "Show ..." switch, so
+            # several can be visible at once regardless of the selected tool.
+            with v3.VBtnToggle(
+                v_model=("active_tool", "cutplane"),
+                mandatory=True,
                 density="comfortable",
-                click=self.ctrl.toggle_play,
-                disabled=("n_times < 2",),
-            )
-            v3.VSlider(
-                v_model=("time_index", 0),
-                min=0,
-                max=("n_times - 1",),
-                step=1,
-                hide_details=True,
-                density="compact",
-                style="max-width: 220px",
-                classes="js-time-slider",
-                disabled=("n_times < 2",),
-            )
-            html.Div(
-                "t = {{ time_label }}",
-                classes="text-caption text-medium-emphasis mx-2 js-time-label",
-                style="min-width: 92px",
-            )
-            # Re-scan for time steps written since the case was opened (a solve
-            # keeps writing them) and jump to the newest.
-            v3.VBtn(
-                icon="mdi-refresh",
-                variant="text",
-                density="comfortable",
-                click=self.ctrl.refresh_times,
-                classes="js-refresh-times",
-            )
+                variant="outlined",
+                divided=True,
+            ):
+                for key, title, icon in TOOLS:
+                    v3.VBtn(title, value=key, prepend_icon=icon, size="small")
 
-            v3.VDivider(vertical=True, classes="mx-2")
-
-            # --- camera -----------------------------------------------------
-            for label, direction in VIEW_BUTTONS:
-                v3.VBtn(
-                    label,
-                    size="small",
-                    variant="tonal",
-                    classes="mx-1 px-2",
-                    min_width="0",
-                    click=(self.ctrl.set_view, f"['{direction}']"),
-                )
-
-            v3.VDivider(vertical=True, classes="mx-2")
+            v3.VSpacer()
 
             # A download link, not a button with a callback: the route renders
             # on demand, so the click and the image cannot get out of step.
@@ -677,22 +663,27 @@ class FoamViz:
                 classes="text-caption text-medium-emphasis mb-2 px-1",
             )
 
-            with v3.VExpansionPanels(
-                model_value=([0, 1],), multiple=True, variant="accordion", flat=True
-            ):
-                self._panel_colour()
-                self._panel_plane()
-                self._panel_surface()
-                self._panel_slice()
-                self._panel_contour()
-                self._panel_streamlines()
-                self._panel_glyphs()
-                self._panel_patches()
+            # Colouring applies to everything, so it stays permanently visible.
+            self._section_colour()
 
-    # -- drawer panels ----------------------------------------------------
+            # One tool's controls at a time, chosen by the toolbar selector. The
+            # panels are only hidden (v-show), not unmounted, so their state and
+            # their representations survive a tool switch.
+            builders = {
+                "cutplane": self._tool_cutplane,
+                "boundary": self._tool_boundary,
+                "contour": self._tool_contour,
+                "stream": self._tool_stream,
+                "glyph": self._tool_glyph,
+            }
+            for key, title, icon in TOOLS:
+                with html.Div(v_show=(f"active_tool === '{key}'",)):
+                    builders[key](title, icon)
 
-    def _panel_colour(self):
-        with _panel("Colour", "mdi-palette"):
+    # -- drawer sections --------------------------------------------------
+
+    def _section_colour(self):
+        with _section("Colour", "mdi-palette"):
             # The `js-*` classes are stable hooks for tests/browser_check.py;
             # Vuetify's own markup offers nothing reliable to select on.
             v3.VSelect(
@@ -751,6 +742,16 @@ class FoamViz:
                     type="number",
                     **_FIELD,
                 )
+            # 0 (or blank) = smooth; >0 bands the map into that many colours.
+            v3.VTextField(
+                v_model_number=("n_colors", 0),
+                label="Bands (0 = smooth)",
+                type="number",
+                min=0,
+                max=32,
+                classes="mt-3 js-bands",
+                **_FIELD,
+            )
             v3.VBtn(
                 "Rescale to data",
                 block=True,
@@ -761,8 +762,10 @@ class FoamViz:
                 click=self.ctrl.rescale,
             )
 
-    def _panel_plane(self):
-        with _panel("Cut plane", "mdi-square-outline"):
+    def _tool_cutplane(self, title, icon):
+        """Cut plane + slice: the plane is the hub the slice, stream seeds and
+        arrows all sit on, and the slice is its most direct visualisation."""
+        with _section(title, icon):
             html.Div(
                 "Slice, stream seeds and arrows all sit on this plane.",
                 classes="text-caption text-medium-emphasis mb-2",
@@ -782,29 +785,38 @@ class FoamViz:
                 v3.VBtn("Y", value="y", size="small")
                 v3.VBtn("Z", value="z", size="small")
             _slider("plane_position", "Position", 0.0, 1.0, 0.005, debounce=True)
+            v3.VDivider(classes="my-3")
+            _switch("slice_visible", "Show slice")
+            _switch("slice_edges", "Mesh edges")
 
-    def _panel_surface(self):
-        with _panel("Room shell", "mdi-cube-outline"):
+    def _tool_boundary(self, title, icon):
+        """Room shell (the boundary surface) + which patches are read."""
+        with _section(title, icon):
             _switch("surface_visible", "Show boundary patches")
             _switch("surface_colored", "Colour by field")
             _switch("surface_cull", "Cull near walls")
             _switch("surface_clip", "Cut away at plane")
             _switch("surface_edges", "Mesh edges")
             _slider("surface_opacity", "Opacity", 0.0, 1.0, 0.01)
+            v3.VDivider(classes="my-3")
+            v3.VSelect(
+                v_model=("selected_patches", []),
+                items=("patch_items",),
+                label="Patches to read",
+                multiple=True,
+                chips=True,
+                closable_chips=True,
+                **_SELECT,
+            )
 
-    def _panel_slice(self):
-        with _panel("Slice", "mdi-layers-outline"):
-            _switch("slice_visible", "Show slice")
-            _switch("slice_edges", "Mesh edges")
-
-    def _panel_contour(self):
-        with _panel("Isosurfaces", "mdi-blur"):
+    def _tool_contour(self, title, icon):
+        with _section(title, icon):
             _switch("contour_visible", "Show isosurfaces")
             _slider("contour_count", "Count", 1, 12, 1, debounce=True)
             _slider("contour_opacity", "Opacity", 0.05, 1.0, 0.05)
 
-    def _panel_streamlines(self):
-        with _panel("Streamlines", "mdi-vector-polyline"):
+    def _tool_stream(self, title, icon):
+        with _section(title, icon):
             _switch("stream_visible", "Show streamlines")
             v3.VSelect(
                 v_model=("vector_field", None),
@@ -816,8 +828,8 @@ class FoamViz:
             _slider("stream_radius", "Tube width", 0.2, 5.0, 0.1)
             _slider("stream_length", "Max length (x domain)", 0.5, 15.0, 0.5, debounce=True)
 
-    def _panel_glyphs(self):
-        with _panel("Vector arrows", "mdi-arrow-top-right"):
+    def _tool_glyph(self, title, icon):
+        with _section(title, icon):
             _switch("glyph_visible", "Show arrows")
             with v3.VBtnToggle(
                 v_model=("glyph_source", "slice"),
@@ -832,18 +844,6 @@ class FoamViz:
             _switch("glyph_scale_by", "Length follows magnitude")
             _slider("glyph_count", "Count", 20, 3000, 20, debounce=True)
             _slider("glyph_scale", "Size", 0.1, 5.0, 0.1)
-
-    def _panel_patches(self):
-        with _panel("Boundary patches", "mdi-select-group"):
-            v3.VSelect(
-                v_model=("selected_patches", []),
-                items=("patch_items",),
-                label="Patches to read",
-                multiple=True,
-                chips=True,
-                closable_chips=True,
-                **_SELECT,
-            )
 
     # -- main content -----------------------------------------------------
 
@@ -860,7 +860,57 @@ class FoamViz:
                 self.ctrl.view_reset_camera = view.reset_camera
 
                 self._legend()
+                self._bottom_bar()
                 self._mode_switch()
+
+    def _bottom_bar(self):
+        """Floating strip over the 3D view: camera presets on the left, the time
+        controls on the right. Camera and time both act on the whole scene, so
+        they live outside the per-tool drawer -- and floating over the canvas
+        keeps them one glance from the result they change."""
+        with html.Div(classes="foamviz-bottombar"):
+            for label, direction in VIEW_BUTTONS:
+                v3.VBtn(
+                    label,
+                    size="small",
+                    variant="tonal",
+                    classes="mx-0 px-2",
+                    min_width="0",
+                    click=(self.ctrl.set_view, f"['{direction}']"),
+                )
+            v3.VDivider(vertical=True, classes="mx-2")
+            v3.VBtn(
+                icon=("playing ? 'mdi-pause' : 'mdi-play'",),
+                variant="text",
+                density="comfortable",
+                click=self.ctrl.toggle_play,
+                disabled=("n_times < 2",),
+            )
+            v3.VSlider(
+                v_model=("time_index", 0),
+                min=0,
+                max=("n_times - 1",),
+                step=1,
+                hide_details=True,
+                density="compact",
+                style="width: 170px",
+                classes="js-time-slider",
+                disabled=("n_times < 2",),
+            )
+            html.Div(
+                "t = {{ time_label }}",
+                classes="text-caption text-medium-emphasis mx-2 js-time-label",
+                style="min-width: 84px",
+            )
+            # Re-scan for time steps written since the case was opened (a solve
+            # keeps writing them) and jump to the newest.
+            v3.VBtn(
+                icon="mdi-refresh",
+                variant="text",
+                density="comfortable",
+                click=self.ctrl.refresh_times,
+                classes="js-refresh-times",
+            )
 
     def _legend(self):
         with html.Div(classes="foamviz-legend"):
@@ -1018,14 +1068,15 @@ def _switch(name, label):
     )
 
 
-def _panel(title, icon):
-    panel = v3.VExpansionPanel()
-    with panel:
-        with v3.VExpansionPanelTitle(classes="text-body-2"):
+def _section(title, icon):
+    """A titled drawer section. Returns the body container to fill with `with`,
+    mirroring how the old expansion-panel helper was used."""
+    with html.Div(classes="foamviz-section"):
+        with html.Div(classes="foamviz-section-head"):
             v3.VIcon(icon, size="small", classes="mr-2")
             html.Span(title)
-        text = v3.VExpansionPanelText()
-    return text
+        body = html.Div(classes="foamviz-section-body")
+    return body
 
 
 _CSS = """
@@ -1052,4 +1103,17 @@ _CSS = """
 .foamviz-axis-key .ax-y { color: #66d966; }
 .foamviz-axis-key .ax-z { color: #598cf2; }
 .foamviz-mode { position: absolute; right: 18px; bottom: 18px; z-index: 5; }
+.foamviz-bottombar {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 5; display: flex; align-items: center; gap: 4px;
+  background: rgba(16,18,24,.72); border: 1px solid rgba(255,255,255,.10);
+  border-radius: 10px; padding: 6px 10px; backdrop-filter: blur(6px);
+}
+.foamviz-section { margin: 2px 0; }
+.foamviz-section-head {
+  display: flex; align-items: center; padding: 10px 4px 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #c8ccd6;
+  border-top: 1px solid rgba(255,255,255,.07);
+}
+.foamviz-section-body { padding: 2px 4px 6px; }
 """

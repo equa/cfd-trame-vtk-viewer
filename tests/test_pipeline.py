@@ -120,6 +120,19 @@ def main():
     check("point mode colours by point data",
           pipe.surface_mapper.GetScalarModeAsString() == "UsePointFieldData")
 
+    # banded colour map — flat plateaus baked into the transfer-function nodes
+    pipe.n_colors = 6
+    pipe.set_color_range(0.0, 1.0)
+    check("6 bands make 12 transfer-function nodes", pipe.lut.GetSize() == 12,
+          f"{pipe.lut.GetSize()} nodes")
+    mid = tuple(round(v, 3) for v in pipe.lut.GetColor(0.10))
+    edge = tuple(round(v, 3) for v in pipe.lut.GetColor(0.15))
+    check("colour is flat within a band", mid == edge, f"{mid} vs {edge}")
+    pipe.n_colors = 0
+    pipe.set_color_range(0.0, 1.0)
+    check("0 bands is the smooth 256-node map", pipe.lut.GetSize() == 256,
+          f"{pipe.lut.GetSize()} nodes")
+
     pipe.update_contour(True, 4, 0.4)
     pipe.contour.Update()
     check("isosurfaces have polygons", pipe.contour.GetOutput().GetNumberOfCells() > 0,

@@ -281,22 +281,20 @@ implemented, and feel free to fix formatting. We will fix and remove items as we
 go, and Niklas may add more. Read the whole list before starting — the ordering
 does not necessarily reflect a good implementation order.
 
-### Widget re-arrangement
+### Widget re-arrangement — DONE 2026-08-15
 
-- Move the viewport buttons (X / Y / Z / Iso) and the time control to a bottom
-  bar.
-- Add widget-type buttons (slice, isosurfaces, streamlines, boundary) to the top
-  bar. Clicking one reveals that widget's submenu — currently a side-bar
-  dropdown — in the side bar. This should give a clearer interface.
-    - Merge the current "Room shell" and "Boundary patches" under one top-bar
-      button, "Boundary".
-    - Merge the current "Cut plane" and "Slice" content under one top-bar button,
-      "Cut plane".
-- The colour settings (field selector, colour map, etc.) stay permanently in the
-  side bar, so the submenus above appear below the ever-present colour settings.
-  (The auto-range and 1–99 % toggle are great — keep them!)
-    - Also add an integer input for the number of colours to show ("banded"
-      colouring).
+All of the below shipped (see "Widget re-arrangement — DONE" implementation note):
+
+- ~~Move the viewport buttons (X / Y / Z / Iso) and the time control to a bottom
+  bar.~~ Floating bottom bar over the 3D view (`_bottom_bar`).
+- ~~Add widget-type buttons (slice, isosurfaces, streamlines, boundary) to the top
+  bar, revealing that widget's submenu in the side bar.~~ Top-bar tool selector
+  (`active_tool`), sections shown via `v-show`.
+    - ~~Merge "Room shell" and "Boundary patches" → "Boundary".~~
+    - ~~Merge "Cut plane" and "Slice" → "Cut plane".~~
+- ~~Colour settings stay permanently in the side bar, submenus below them.~~
+    - ~~Integer input for number of colours ("banded" colouring).~~ `n_colors`
+      (0 = smooth), banded via flat transfer-function nodes; legend bands too.
 
 ### Slider behaviour
 
@@ -349,30 +347,40 @@ rather than editing each slider; keep the cheap sliders live.
   bigger change and not what's asked. The numeric field binds the real var and
   commits once, exactly like the slider release.
 
-### Widget re-arrangement
+### Widget re-arrangement — DONE 2026-08-15
 
-- The layout (`SinglePageWithDrawerLayout`) exposes a `footer` slot (verified) —
-  use it for the bottom bar: move the camera buttons (`VIEW_BUTTONS`) and the
-  whole time group out of `_toolbar()` into `with self.ui.footer:`.
-- Top-bar tool buttons: a `VBtnToggle` bound to a new `active_tool` state var
-  (e.g. `'boundary' | 'cutplane' | 'contour' | 'stream' | 'glyph'`). The drawer
-  then becomes: `_panel_colour()` always shown, then the active tool's block via
-  `v_show`/`v_if` on `active_tool` — most likely replacing the current
-  always-open `VExpansionPanels` accordion in `_drawer()`.
-- Merges: "Boundary" = `_panel_surface()` + `_panel_patches()`; "Cut plane" =
-  `_panel_plane()` + `_panel_slice()`.
-- **Watch out — the cut plane is the seeding hub.** The slice, streamline seeds
-  *and* glyph seeds all derive from `plane_axis`/`plane_position` (see the
-  architecture paragraph). If the tools are mutually exclusive tabs, the plane
-  controls must stay reachable while on the Streamlines/Glyphs tool — either keep
-  axis/position in a shared, always-visible spot, or repeat them in those tools.
-  Decide this before starting the refactor; it shapes the whole layout.
-- **Banded colouring:** add an `n_colors` state var (blank/0 = continuous).
-  `colors.py` feeds *both* the VTK transfer function and the HTML legend gradient
-  from the same `_samples()`, so band there (a discrete `vtkLookupTable` with
-  `SetNumberOfColors(n)` over the range, plus a stepped `css_gradient`) and the
-  legend bands to match for free. Small and self-contained — can piggyback on
-  this pass.
+- **`TOOLS` is the single source** for the five tools (key, title, icon). It
+  drives both the top-bar `VBtnToggle` (bound to `active_tool`) and the drawer
+  sections, so they can't drift. Each tool has a `_tool_<key>(title, icon)`
+  builder; `_drawer()` loops `TOOLS` and wraps each in a `v-show` div.
+- **Tools are control-only, not visibility.** Selecting a tool only changes which
+  controls the drawer shows (`v-show`, so panels stay mounted and keep their
+  state). What's drawn is still each representation's own "Show …" switch, so a
+  slice + streamlines + isosurfaces can all be visible while you tweak just one.
+  This is the key idea that made the refactor clean — no per-tool render logic.
+- **Cut-plane-hub question, resolved:** the plane controls live in the "Cut
+  plane" tool (merged with the slice, per spec), and the "Slice, stream seeds and
+  arrows all sit on this plane" caption stays. Moving the seeding plane while
+  configuring streamlines/arrows means a hop to the Cut plane tool — acceptable,
+  and it kept the layout duplication-free. If that hop proves annoying, the tidy
+  fix is to promote the plane block to a second persistent section (like Colour),
+  *not* to repeat the control in three tabs.
+- **Bottom bar** is a floating strip inside `.foamviz-stage` (`_bottom_bar`),
+  matching the legend/mode overlays — not the Vuetify `footer` (which carries the
+  "Powered by trame" branding, kept). Camera presets left, time group right. The
+  `js-time-slider` / `js-time-label` / `js-refresh-times` test hooks moved with
+  it; the time slider stays live (not debounced) so playback and the keyboard
+  browser-test step still work.
+- **Sections:** `_panel()` (expansion panel) was replaced by `_section(title,
+  icon)` — a plain header + body div — since only one tool shows at a time. The
+  browser test's `panel()` accordion helper became `tool()` (clicks the top-bar
+  button).
+- **Banded colouring:** `n_colors` state (0 = smooth). `colors.color_transfer_function`
+  bakes banding into the CTF *nodes* as flat plateaus (two coincident-value-safe
+  nodes per band) — NOT `vtkDiscretizableColorTransferFunction`, whose `DeepCopy`
+  (used by `set_color_range` on every range change) drops the discretize flag
+  (verified). `css_gradient` gained a matching stepped branch, so the legend
+  bands too.
 
 ### Visualisation options
 
@@ -397,7 +405,7 @@ rather than editing each slider; keep the cheap sliders live.
 
 1. ~~**Slider debounce**~~ — **done** (core; plane outline + numeric XYZ remain).
 2. ~~**Cull-front-face** and **point/cell toggle**~~ — **done 2026-08-14**.
-3. **Widget re-arrangement** (+ banded colouring) — one focused UI pass; settle
-   the cut-plane-hub question first. **← next**
-4. **Crinkle slice** — self-contained but the largest single feature.
+3. ~~**Widget re-arrangement** (+ banded colouring)~~ — **done 2026-08-15**.
+4. **Crinkle slice** — self-contained but the largest single feature. **← next**
+5. Slider refinements: plane outline during drag, numeric XYZ plane position.
  

@@ -91,22 +91,14 @@ def main():
                 page.screenshot(path=str(out / f"{name}.png"))
                 print(f"  -> {out / f'{name}.png'}")
 
-            def panel(title, expanded=True):
-                """Put a drawer accordion into the wanted state.
-
-                Idempotent on purpose -- some panels start expanded, and a
-                blind click on the title would close the very panel the next
-                step needs.
+            def tool(title):
+                """Select a widget tool from the top-bar selector, revealing its
+                controls in the drawer. Idempotent: the selector is a mandatory
+                toggle, so re-clicking the active tool is a no-op. Colouring is
+                always visible and needs no tool.
                 """
-                node = page.locator(
-                    ".v-expansion-panel", has=page.get_by_text(title, exact=True)
-                ).first
-                is_open = "v-expansion-panel--active" in (
-                    node.get_attribute("class") or ""
-                )
-                if is_open != expanded:
-                    node.locator(".v-expansion-panel-title").click()
-                    page.wait_for_timeout(800)
+                page.get_by_role("button", name=title, exact=True).click()
+                page.wait_for_timeout(500)
 
             try:
                 # 1. default view: slice through the thermal plume
@@ -115,16 +107,16 @@ def main():
                 shot("01-default")
 
                 # 2. streamlines
-                panel("Streamlines")
+                tool("Streamlines")
                 page.get_by_label("Show streamlines").check()
                 page.wait_for_timeout(5000)
                 wait_for_render(page, "streamlines")
                 shot("02-streamlines")
 
                 # 3. colour by velocity magnitude instead of temperature.
-                # Click the field wrapper, not the input: Vuetify overlays a
-                # div that intercepts pointer events on the input itself.
-                panel("Colour")
+                # The Colour section is always visible -- no tool needed. Click
+                # the field wrapper, not the input: Vuetify overlays a div that
+                # intercepts pointer events on the input itself.
                 page.locator(".js-color-field .v-field").click()
                 page.wait_for_timeout(600)
                 page.get_by_role("option", name="U", exact=True).click()
@@ -138,15 +130,13 @@ def main():
                 shot("03-velocity")
 
                 # 4. vector arrows on the cut plane
-                panel("Streamlines", expanded=False)
-                panel("Vector arrows")
+                tool("Arrows")
                 page.get_by_label("Show arrows").check()
                 page.wait_for_timeout(3500)
                 shot("04-arrows")
 
                 # 5. isosurfaces
-                panel("Vector arrows", expanded=False)
-                panel("Isosurfaces")
+                tool("Isosurfaces")
                 page.get_by_label("Show isosurfaces").check()
                 page.wait_for_timeout(3500)
                 shot("05-isosurfaces")
@@ -176,8 +166,7 @@ def main():
                 # the gradient and the geometry come from one sampled table.
                 page.get_by_role("button", name="Client", exact=True).click()
                 page.wait_for_timeout(2500)
-                panel("Isosurfaces", expanded=False)
-                panel("Colour")
+                # Colour is always visible; no tool switch needed.
                 gradient_before = page.locator(".foamviz-legend-bar").get_attribute("style")
                 page.locator(".js-preset .v-field").click()
                 page.wait_for_timeout(600)

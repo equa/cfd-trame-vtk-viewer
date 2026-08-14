@@ -41,6 +41,8 @@ class FoamPipeline:
         # Colour the surface/slice by true cell values (flat per cell) rather
         # than the reader's point-interpolated (smooth) values.
         self.use_cell_data = False
+        # 0 = smooth colour map; >0 bands it into that many discrete colours.
+        self.n_colors = 0
 
         self._build_scene()
         self._build_filters()
@@ -332,7 +334,7 @@ class FoamPipeline:
 
     def set_color_range(self, vmin, vmax):
         self.color_range = (vmin, vmax)
-        new_lut = colors.color_transfer_function(self.preset, vmin, vmax)
+        new_lut = colors.color_transfer_function(self.preset, vmin, vmax, self.n_colors)
         self.lut.DeepCopy(new_lut)
         for mapper in (
             self.surface_mapper,
