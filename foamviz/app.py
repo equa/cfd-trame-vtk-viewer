@@ -153,6 +153,10 @@ class FoamViz:
                 "selected_patches": [],
             }
         )
+        # Debounced sliders (see _slider(debounce=True)) bind their thumb to a
+        # `<name>_draft` mirror during the drag and only commit the real var on
+        # release, so their heavy change handler runs once, not every tick.
+        self.state.update({f"{n}_draft": getattr(self.state, n) for n in _DEBOUNCED})
 
     # ------------------------------------------------------------- case load
 
@@ -185,6 +189,7 @@ class FoamViz:
             }
         )
 
+        self._sync_drafts()  # keep debounced sliders' *_draft in step with the case
         self.pipeline.update_data()
         self._loading = False
         self._rescale()
@@ -260,6 +265,13 @@ class FoamViz:
             p.set_view("iso")
             self.ctrl.view_reset_camera()
         self.ctrl.view_update()
+
+    def _sync_drafts(self):
+        """Mirror each debounced slider's real var into its `<name>_draft`, so a
+        thumb bound to the draft follows programmatic changes (case load, and any
+        future reset) instead of snapping back to a stale drag value."""
+        for n in _DEBOUNCED:
+            setattr(self.state, f"{n}_draft", getattr(self.state, n))
 
     def _rescale(self):
         """Recompute the colour range from the data, honouring the range mode."""
@@ -760,7 +772,7 @@ class FoamViz:
                 v3.VBtn("X", value="x", size="small")
                 v3.VBtn("Y", value="y", size="small")
                 v3.VBtn("Z", value="z", size="small")
-            _slider("plane_position", "Position", 0.0, 1.0, 0.005)
+            _slider("plane_position", "Position", 0.0, 1.0, 0.005, debounce=True)
 
     def _panel_surface(self):
         with _panel("Room shell", "mdi-cube-outline"):
@@ -778,7 +790,7 @@ class FoamViz:
     def _panel_contour(self):
         with _panel("Isosurfaces", "mdi-blur"):
             _switch("contour_visible", "Show isosurfaces")
-            _slider("contour_count", "Count", 1, 12, 1)
+            _slider("contour_count", "Count", 1, 12, 1, debounce=True)
             _slider("contour_opacity", "Opacity", 0.05, 1.0, 0.05)
 
     def _panel_streamlines(self):
@@ -790,9 +802,9 @@ class FoamViz:
                 label="Vector field",
                 **_SELECT,
             )
-            _slider("stream_seeds", "Seeds", 5, 400, 5)
+            _slider("stream_seeds", "Seeds", 5, 400, 5, debounce=True)
             _slider("stream_radius", "Tube width", 0.2, 5.0, 0.1)
-            _slider("stream_length", "Max length (x domain)", 0.5, 15.0, 0.5)
+            _slider("stream_length", "Max length (x domain)", 0.5, 15.0, 0.5, debounce=True)
 
     def _panel_glyphs(self):
         with _panel("Vector arrows", "mdi-arrow-top-right"):
@@ -808,7 +820,7 @@ class FoamViz:
                 v3.VBtn("On plane", value="slice", size="small")
                 v3.VBtn("In volume", value="volume", size="small")
             _switch("glyph_scale_by", "Length follows magnitude")
-            _slider("glyph_count", "Count", 20, 3000, 20)
+            _slider("glyph_count", "Count", 20, 3000, 20, debounce=True)
             _slider("glyph_scale", "Size", 0.1, 5.0, 0.1)
 
     def _panel_patches(self):
@@ -943,14 +955,33 @@ def _format_ticks(values):
     return [f"{v:.{min(decimals, 8)}f}" for v in values]
 
 
-def _slider(name, label, vmin, vmax, step):
-    """A labelled slider that shows its current value."""
+# Heavy sliders whose change handler rebuilds geometry — debounced so the work
+# runs once on release, not on every tick of a drag. Each gets a `<name>_draft`
+# mirror in the state; _sync_drafts() keeps it aligned on programmatic changes.
+_DEBOUNCED = (
+    "plane_position",
+    "contour_count",
+    "stream_seeds",
+    "stream_length",
+    "glyph_count",
+)
+
+
+def _slider(name, label, vmin, vmax, step, debounce=False):
+    """A labelled slider that shows its current value.
+
+    ``debounce=True`` binds the thumb (and its live label) to a ``<name>_draft``
+    mirror and only writes the real state var on release (VSlider ``@end``), so
+    an expensive change handler fires once per drag rather than every tick. The
+    real var must be in :data:`_DEBOUNCED` so its draft is initialised and
+    re-synced. Cheap sliders leave ``debounce`` off and stay live."""
+    model = f"{name}_draft" if debounce else name
     with html.Div(classes="mb-2"):
         with html.Div(classes="d-flex justify-space-between"):
             html.Span(label, classes="text-caption text-medium-emphasis")
-            html.Span(f"{{{{ {name} }}}}", classes="text-caption")
-        v3.VSlider(
-            v_model=(name,),
+            html.Span(f"{{{{ {model} }}}}", classes="text-caption")
+        kwargs = dict(
+            v_model=(model,),
             min=vmin,
             max=vmax,
             step=step,
@@ -959,6 +990,11 @@ def _slider(name, label, vmin, vmax, step):
             color="primary",
             thumb_size=12,
         )
+        if debounce:
+            # JS run on the client at release: commit the draft to the real var,
+            # which flushes to the server and triggers the heavy handler once.
+            kwargs["end"] = f"{name} = {model}"
+        v3.VSlider(**kwargs)
 
 
 def _switch(name, label):

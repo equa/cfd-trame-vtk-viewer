@@ -247,40 +247,155 @@ API on :5001) and `project_iceopenfoam` (EQUA's OpenFOAM-13 extension libs).
    be derived arrays computed at load — the same mechanism as `FoamVizColor`,
    so the hook already exists (`pipeline.apply_color_array`).
 
-## Known work, deferred
+## Slider debounce — DONE (2026-08-14)
 
-### Sliders re-render live — debounce them
+The heavy sliders no longer re-render on every drag tick. `_slider(debounce=True)`
+binds the thumb (and its live label) to a `<name>_draft` mirror and commits the
+real state var only on release, via the VSlider `@end` event
+(`end="<name> = <name>_draft"` — client-side JS, one flush). The real-var change
+then runs the heavy handler once, behind the busy overlay. Debounced:
+`plane_position`, `contour_count`, `stream_seeds`, `stream_length`, `glyph_count`
+(listed in `_DEBOUNCED`). Cheap render-only sliders (opacity, tube width, glyph
+size) stay live. `_sync_drafts()` (called from `load_case`) re-mirrors the drafts
+so a slider follows programmatic changes instead of snapping back to a stale
+drag value; it's the hook for the reset the To-do list will add.
 
-Requested by Niklas 2026-08-11, explicitly **for later**. Do not start it
-without asking; it is the one agreed defect, not a discovered one.
+Note on trame 3.2.5: `VSlider._event_names` is empty at class level — events are
+resolved per instance, so `end=`/`start=` bind fine (verified: the template
+emits `@end`), the earlier `_event_names` claim was wrong.
 
-Every slider binds `v_model` straight to the state variable, so dragging fires
-a state flush per tick and each flush runs the whole of `update_scene()`. At
-32 000 cells that is invisible; at 12 M it is not. The expensive ones are
-`plane_position` (recuts the slice, then reseeds streamlines *and* glyphs),
-`stream_seeds`, `glyph_count` and `contour_count`. Opacity and tube width are
-cheap and can stay live.
+The **time** slider is deliberately left live: playback steps it programmatically
+and `tests/browser_check.py` step 7 drives it with keyboard arrows expecting a
+live label. A mouse-drag of it on a big case would still flood — revisit if it
+bites (it would need the same draft treatment plus a per-step draft resync in the
+play loop, and a client-side label mapping index→time).
 
-The clean fix keeps the drag entirely client-side. Vuetify's `VSlider` emits
-`start` and `end` (both confirmed present in `trame_vuetify`'s
-`_event_names`), so bind the slider to a draft variable and copy it into the
-real one on release:
+Alternatives rejected during the original build: server-side throttle/debounce
+(still pays the round trip, feels laggy not stepped) and lowering default counts
+(treats the symptom).
 
-```python
-v3.VSlider(
-    v_model=("plane_position_draft", 0.5),
-    end="plane_position = plane_position_draft",   # JS: one flush, on release
-    ...
-)
-html.Span("{{ plane_position_draft }}")            # label still tracks the drag
-```
+## To-do list
 
-No server round trip while dragging, one `update_scene()` at the end. Watch
-two things: the draft must be re-synced if the real variable changes from
-elsewhere (case load, reset), and `_slider()` in `app.py` is shared by every
-panel, so it needs a flag rather than a blanket change — the cheap sliders are
-nicer live.
+Things for future consideration and work, added by Niklas. Remove items when
+implemented, and feel free to fix formatting. We will fix and remove items as we
+go, and Niklas may add more. Read the whole list before starting — the ordering
+does not necessarily reflect a good implementation order.
 
-Alternatives considered and rejected during the build: server-side
-throttle/debounce (still pays the round trip and makes the UI feel laggy rather
-than stepped), and simply lowering default counts (treats the symptom).
+### Widget re-arrangement
+
+- Move the viewport buttons (X / Y / Z / Iso) and the time control to a bottom
+  bar.
+- Add widget-type buttons (slice, isosurfaces, streamlines, boundary) to the top
+  bar. Clicking one reveals that widget's submenu — currently a side-bar
+  dropdown — in the side bar. This should give a clearer interface.
+    - Merge the current "Room shell" and "Boundary patches" under one top-bar
+      button, "Boundary".
+    - Merge the current "Cut plane" and "Slice" content under one top-bar button,
+      "Cut plane".
+- The colour settings (field selector, colour map, etc.) stay permanently in the
+  side bar, so the submenus above appear below the ever-present colour settings.
+  (The auto-range and 1–99 % toggle are great — keep them!)
+    - Also add an integer input for the number of colours to show ("banded"
+      colouring).
+
+### Slider behaviour
+
+- ~~Delay slider actions until the slider is released.~~ **Done 2026-08-14** for
+  the heavy geometry sliders (see "Slider debounce — DONE" above). Remaining
+  refinements:
+    - Draw a plane outline that follows the slider during the drag (live preview
+      without a recut).
+    - Add a numeric input for the slider position, in actual plane-point
+      coordinates (X Y Z).
+    - (Optional) debounce the time slider too — see the note in that section.
+
+### Visualisation options
+
+- Boundary visualisation: default to "cull front face", with a toggle.
+- Toggle between point-interpolated values and true cell values.
+- Slice-plane visualisation: when the mesh is shown, switch to a "crinkle slice"
+  — show the whole layer of intersected cells with the mesh, i.e. the true mesh,
+  not a triangulated slice.
+
+## To-do — implementation notes (Claude)
+
+Grounding notes for the list above; **not yet implemented**. Code pointers are to
+the tree as it stands (line numbers drift). A suggested order is at the end.
+
+### Slider behaviour — do this first
+
+Already scoped under "Known work, deferred" above (the `VSlider` `start`/`end`
+draft-variable approach — no server round trip during the drag, one
+`update_scene()` on release). Worth doing first: it's the biggest felt win, and
+it makes the **new busy overlay** pleasant on heavy sliders — otherwise a drag
+flashes the overlay every tick, since `plane_position`/`contour_count`/
+`stream_seeds`/`glyph_count` are in the "heavy" handler group now. `_slider()` in
+`app.py` is shared by every panel, so add a `debounce=True` parameter to it
+rather than editing each slider; keep the cheap sliders live.
+
+- **Plane outline following the drag:** draw a cheap outline actor — just the
+  plane rectangle at the *draft* position, no cutter, no recut — updated live on
+  the draft var, while the real slice/streamlines/glyphs recompute only on
+  release. An outline is cheap enough to stay live even in server render mode.
+- **Numeric XYZ input:** `plane_position` is currently normalised 0..1 along
+  `plane_axis`. Exposing world coordinates means converting to/from the mesh
+  bounds. Keep the plane axis-aligned for now and show the world coordinate along
+  the active axis (metres); a fully free plane (arbitrary normal) is a much
+  bigger change and not what's asked. The numeric field binds the real var and
+  commits once, exactly like the slider release.
+
+### Widget re-arrangement
+
+- The layout (`SinglePageWithDrawerLayout`) exposes a `footer` slot (verified) —
+  use it for the bottom bar: move the camera buttons (`VIEW_BUTTONS`) and the
+  whole time group out of `_toolbar()` into `with self.ui.footer:`.
+- Top-bar tool buttons: a `VBtnToggle` bound to a new `active_tool` state var
+  (e.g. `'boundary' | 'cutplane' | 'contour' | 'stream' | 'glyph'`). The drawer
+  then becomes: `_panel_colour()` always shown, then the active tool's block via
+  `v_show`/`v_if` on `active_tool` — most likely replacing the current
+  always-open `VExpansionPanels` accordion in `_drawer()`.
+- Merges: "Boundary" = `_panel_surface()` + `_panel_patches()`; "Cut plane" =
+  `_panel_plane()` + `_panel_slice()`.
+- **Watch out — the cut plane is the seeding hub.** The slice, streamline seeds
+  *and* glyph seeds all derive from `plane_axis`/`plane_position` (see the
+  architecture paragraph). If the tools are mutually exclusive tabs, the plane
+  controls must stay reachable while on the Streamlines/Glyphs tool — either keep
+  axis/position in a shared, always-visible spot, or repeat them in those tools.
+  Decide this before starting the refactor; it shapes the whole layout.
+- **Banded colouring:** add an `n_colors` state var (blank/0 = continuous).
+  `colors.py` feeds *both* the VTK transfer function and the HTML legend gradient
+  from the same `_samples()`, so band there (a discrete `vtkLookupTable` with
+  `SetNumberOfColors(n)` over the range, plus a stepped `css_gradient`) and the
+  legend bands to match for free. Small and self-contained — can piggyback on
+  this pass.
+
+### Visualisation options
+
+- **Cull front face:** `surface_actor.GetProperty().SetFrontfaceCulling(1)` on
+  the boundary shell lets you see into the room. Add a `boundary_cull` state var
+  (default True, per request) and set it in the pipeline. It's a render-only
+  property, so it belongs in the "cheap"/live handler group, not behind the
+  overlay.
+- **Point-interpolated vs true cell values:** the reader already builds point
+  data (`SetCreateCellToPoint(1)` in `case.py`); the surface mapper currently
+  uses `SetScalarModeToUsePointFieldData()`. Toggle the mapper between point and
+  cell scalar mode and bake `FoamVizColor` on the matching association
+  (`apply_color_array`). **Scope it to the surface/slice colouring only** —
+  contour (marching cubes) and streamlines need *point* scalars/vectors and
+  can't run off cell data.
+- **Crinkle slice:** the biggest lift. The slice is a `vtkCutter` (triangulated
+  planar cut); a crinkle slice keeps whole cells the plane passes through.
+  Implement by evaluating the plane's signed distance at each cell's points and
+  extracting the cells with a sign change (straddling), e.g. via
+  `vtkExtractGeometry` with the plane implicit function, then draw with edges.
+  Gate it on "mesh shown" (`slice_edges`). Standalone; do it last.
+
+### Suggested order
+
+1. **Slider debounce** (+ plane outline, numeric XYZ) — foundational, biggest
+   felt win, and it pairs directly with the busy overlay.
+2. **Cull-front-face** and **point/cell toggle** — small and independent.
+3. **Widget re-arrangement** (+ banded colouring) — one focused UI pass; settle
+   the cut-plane-hub question first.
+4. **Crinkle slice** — self-contained but the largest single feature.
+ 
