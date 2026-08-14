@@ -102,6 +102,33 @@ class FoamPipeline:
         # the two renderers then guess at differently.
         self.slice_actor.GetProperty().LightingOff()
 
+        # Plane outline: an amber frame at the cut plane. It updates live while
+        # the position slider is dragged (cheap -- four points, no recut), so it
+        # previews where the debounced slice will land on release, and it marks
+        # the seeding plane from any tool. Just four corner points + a line loop.
+        self.plane_outline = vtk.vtkPolyData()
+        pts = vtk.vtkPoints()
+        pts.SetNumberOfPoints(4)
+        self.plane_outline.SetPoints(pts)
+        loop = vtk.vtkCellArray()
+        ids = vtk.vtkIdList()
+        for i in (0, 1, 2, 3, 0):
+            ids.InsertNextId(i)
+        loop.InsertNextCell(ids)
+        self.plane_outline.SetLines(loop)
+        self.plane_outline_actor, self.plane_outline_mapper = self._make_actor(
+            scalar_visibility=False
+        )
+        self.plane_outline_mapper.SetInputData(self.plane_outline)
+        pop = self.plane_outline_actor.GetProperty()
+        pop.SetColor(0.95, 0.75, 0.20)
+        pop.SetLineWidth(2)
+        pop.LightingOff()
+        # Always within the domain (a cross-section), so keep it out of
+        # ResetCamera -- and out of the way before it is first positioned, when
+        # its four points still sit at the origin.
+        self.plane_outline_actor.SetUseBounds(False)
+
         # --- isosurface ---------------------------------------------------
         self.contour = vtk.vtkContourFilter()
         self.contour.SetInputArrayToProcess(
@@ -169,6 +196,7 @@ class FoamPipeline:
         for actor in (
             self.surface_actor,
             self.slice_actor,
+            self.plane_outline_actor,
             self.contour_actor,
             self.stream_actor,
             self.glyph_actor,
@@ -371,13 +399,21 @@ class FoamPipeline:
 
     # -- representations ---------------------------------------------------
 
+    def _plane_position(self, axis, fraction):
+        """World coordinate of the plane along *axis* at *fraction* of the bounds.
+        Nudged off the exact boundary: a cut on the outer face is degenerate."""
+        lo, hi = self._axis_range(axis)
+        return lo + (hi - lo) * min(max(fraction, 0.001), 0.999)
+
+    def _axis_range(self, axis):
+        b = self.case.bounds()  # xmin, xmax, ymin, ymax, zmin, zmax
+        i = "xyz".index(axis)
+        return b[2 * i], b[2 * i + 1]
+
     def update_plane(self, axis, fraction):
         """Position the shared cut/clip plane along *axis* at *fraction* of the bounds."""
         xmin, xmax, ymin, ymax, zmin, zmax = self.case.bounds()
-        span = {"x": (xmin, xmax), "y": (ymin, ymax), "z": (zmin, zmax)}[axis]
-        # Nudge off the exact boundary: a cut exactly on the outer face
-        # produces degenerate, flickering geometry.
-        pos = span[0] + (span[1] - span[0]) * min(max(fraction, 0.001), 0.999)
+        pos = self._plane_position(axis, fraction)
 
         origin = [(xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2]
         origin["xyz".index(axis)] = pos
@@ -386,6 +422,25 @@ class FoamPipeline:
         for plane in (self.cutter.GetCutFunction(), self.surface_clip.GetClipFunction()):
             plane.SetOrigin(*origin)
             plane.SetNormal(*normal)
+
+    def update_plane_outline(self, axis, fraction):
+        """Move the amber plane frame to *fraction* along *axis* -- four points,
+        no recut, so it is cheap enough to follow a slider drag live."""
+        pos = self._plane_position(axis, fraction)
+        ai = "xyz".index(axis)
+        others = [i for i in range(3) if i != ai]
+        b = self.case.bounds()
+        u = (b[2 * others[0]], b[2 * others[0] + 1])
+        v = (b[2 * others[1]], b[2 * others[1] + 1])
+
+        pts = self.plane_outline.GetPoints()
+        for k, (uu, vv) in enumerate([(u[0], v[0]), (u[1], v[0]), (u[1], v[1]), (u[0], v[1])]):
+            corner = [0.0, 0.0, 0.0]
+            corner[ai] = pos
+            corner[others[0]] = uu
+            corner[others[1]] = vv
+            pts.SetPoint(k, *corner)
+        pts.Modified()
 
     def update_surface(self, visible, colored, opacity, edges, clip, cull):
         self.surface_actor.SetVisibility(1 if visible else 0)

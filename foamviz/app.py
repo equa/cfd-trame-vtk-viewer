@@ -141,6 +141,9 @@ class FoamViz:
                 # cut plane
                 "plane_axis": "z",
                 "plane_position": 0.5,
+                # world coordinate of the plane along the active axis (metres);
+                # a second way to place the slice, kept in step with the slider.
+                "plane_coord": 0.0,
                 # representations
                 "surface_visible": True,
                 "surface_colored": False,
@@ -209,6 +212,7 @@ class FoamViz:
         )
 
         self._sync_drafts()  # keep debounced sliders' *_draft in step with the case
+        self._sync_plane_coord()  # bounds changed -> refresh the world-coord field
         self.pipeline.update_data()
         self._loading = False
         self._rescale()
@@ -257,6 +261,7 @@ class FoamViz:
         p.set_color_range(float(s.range_min), float(s.range_max))
 
         p.update_plane(s.plane_axis, float(s.plane_position))
+        p.update_plane_outline(s.plane_axis, float(s.plane_position))
         p.update_surface(
             s.surface_visible,
             s.surface_colored,
@@ -294,6 +299,35 @@ class FoamViz:
         future reset) instead of snapping back to a stale drag value."""
         for n in _DEBOUNCED:
             setattr(self.state, f"{n}_draft", getattr(self.state, n))
+
+    # -- cut plane: fraction (0..1) <-> world coordinate --------------------
+
+    def _axis_range(self, axis):
+        b = self.case.bounds()  # xmin, xmax, ymin, ymax, zmin, zmax
+        i = "xyz".index(axis)
+        return b[2 * i], b[2 * i + 1]
+
+    def _coord_from_fraction(self, axis, frac):
+        lo, hi = self._axis_range(axis)
+        return lo + (hi - lo) * min(max(frac, 0.0), 1.0)
+
+    def _fraction_from_coord(self, axis, coord):
+        lo, hi = self._axis_range(axis)
+        return 0.5 if hi <= lo else min(max((coord - lo) / (hi - lo), 0.0), 1.0)
+
+    def _sync_plane_coord(self):
+        """Refresh the world-coordinate field (and the slider draft) from the
+        committed fraction/axis/bounds — after a coord edit, an axis switch or a
+        case load. The coord field and the fraction are two views of one plane."""
+        if self.case is None:
+            return
+        if self.state.plane_position_draft != self.state.plane_position:
+            self.state.plane_position_draft = self.state.plane_position
+        coord = round(
+            self._coord_from_fraction(self.state.plane_axis, float(self.state.plane_position)), 4
+        )
+        if self.state.plane_coord != coord:
+            self.state.plane_coord = coord
 
     def _rescale(self):
         """Recompute the colour range from the data, honouring the range mode."""
@@ -424,6 +458,37 @@ class FoamViz:
         self.case.load(self.case.times[int(self.state.time_index)], self.state.selected_patches)
         self.pipeline.update_data()
         self.update_scene()
+
+    @change("plane_position_draft")
+    def _on_plane_preview(self, **_):
+        """Live, cheap preview while the position slider is dragged: move the
+        amber plane frame to the draft position without recutting. The real
+        slice/streamlines/glyphs recompute once, on release, via _on_heavy."""
+        if self._loading or self.case is None:
+            return
+        self.pipeline.update_plane_outline(
+            self.state.plane_axis, float(self.state.plane_position_draft)
+        )
+        self.ctrl.view_update()
+
+    @change("plane_position", "plane_axis")
+    def _on_plane_sync(self, **_):
+        # Keep the world-coord field and the slider draft in step with the
+        # committed position (needed after a coord edit or an axis switch).
+        if self._loading or self.case is None:
+            return
+        self._sync_plane_coord()
+
+    @change("plane_coord")
+    def _on_plane_coord(self, plane_coord, **_):
+        """Place the plane from a typed world coordinate. Setting plane_position
+        commits it (heavy, via _on_heavy) and echoes back through _on_plane_sync;
+        the fraction comparison absorbs that echo so it does not loop."""
+        if self._loading or self.case is None:
+            return
+        frac = self._fraction_from_coord(self.state.plane_axis, float(plane_coord or 0.0))
+        if abs(frac - float(self.state.plane_position)) > 1e-4:
+            self.state.plane_position = round(frac, 6)
 
     @change("color_field", "color_component", "robust_range")
     def _on_field(self, **_):
@@ -787,6 +852,15 @@ class FoamViz:
                 v3.VBtn("Y", value="y", size="small")
                 v3.VBtn("Z", value="z", size="small")
             _slider("plane_position", "Position", 0.0, 1.0, 0.005, debounce=True)
+            # Exact placement by world coordinate along the active axis (metres).
+            v3.VTextField(
+                v_model_number=("plane_coord", 0.0),
+                label=("plane_axis.toUpperCase() + ' coordinate [m]'",),
+                type="number",
+                step=0.05,
+                classes="mt-1 js-plane-coord",
+                **_FIELD,
+            )
             v3.VDivider(classes="my-3")
             _switch("slice_visible", "Show slice")
             # With the mesh on, the slice becomes a crinkle slice: whole cells

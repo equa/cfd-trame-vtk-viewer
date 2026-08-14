@@ -99,6 +99,15 @@ def main():
     check("crinkle carries the colour array",
           crink.GetPointData().GetArray(COLOR_ARRAY) is not None)
 
+    # plane outline: four coplanar corners at the cut height (cheap drag preview)
+    pipe.update_plane_outline("z", 0.5)
+    op = pipe.plane_outline.GetPoints()
+    zbounds = case.bounds()[4:6]
+    zs = {round(op.GetPoint(i)[2], 6) for i in range(4)}
+    check("plane outline is planar", len(zs) == 1, str(zs))
+    mid_z = zbounds[0] + (zbounds[1] - zbounds[0]) * 0.5
+    check("plane outline sits at the cut height", abs(next(iter(zs)) - mid_z) < 1e-6)
+
     pipe.update_surface(True, True, 0.3, False, True, False)
     pipe.surface_clip.Update()
     clipped = pipe.surface_clip.GetOutput().GetNumberOfCells()

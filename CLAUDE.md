@@ -299,13 +299,16 @@ All of the below shipped (see "Widget re-arrangement — DONE" implementation no
 ### Slider behaviour
 
 - ~~Delay slider actions until the slider is released.~~ **Done 2026-08-14** for
-  the heavy geometry sliders (see "Slider debounce — DONE" above). Remaining
-  refinements:
-    - Draw a plane outline that follows the slider during the drag (live preview
-      without a recut).
-    - Add a numeric input for the slider position, in actual plane-point
-      coordinates (X Y Z).
-    - (Optional) debounce the time slider too — see the note in that section.
+  the heavy geometry sliders (see "Slider debounce — DONE" above).
+    - ~~Draw a plane outline that follows the slider during the drag.~~ **Done
+      2026-08-15** — amber plane frame (`plane_outline`), moved live on the draft
+      by `_on_plane_preview` without recutting; also marks the seeding plane from
+      any tool.
+    - ~~Numeric input for the plane position in world coordinates.~~ **Done
+      2026-08-15** — the "&lt;axis&gt; coordinate [m]" field (`plane_coord`), kept
+      in step with the slider both ways.
+    - (Optional, not done) debounce the time slider too — see the note in the
+      "Slider debounce — DONE" section.
 
 ### Visualisation options
 
@@ -337,16 +340,26 @@ flashes the overlay every tick, since `plane_position`/`contour_count`/
 `app.py` is shared by every panel, so add a `debounce=True` parameter to it
 rather than editing each slider; keep the cheap sliders live.
 
-- **Plane outline following the drag:** draw a cheap outline actor — just the
-  plane rectangle at the *draft* position, no cutter, no recut — updated live on
-  the draft var, while the real slice/streamlines/glyphs recompute only on
-  release. An outline is cheap enough to stay live even in server render mode.
-- **Numeric XYZ input:** `plane_position` is currently normalised 0..1 along
-  `plane_axis`. Exposing world coordinates means converting to/from the mesh
-  bounds. Keep the plane axis-aligned for now and show the world coordinate along
-  the active axis (metres); a fully free plane (arbitrary normal) is a much
-  bigger change and not what's asked. The numeric field binds the real var and
-  commits once, exactly like the slider release.
+- ~~**Plane outline following the drag**~~ — **Done 2026-08-15.** `plane_outline`
+  (four points + a line loop, amber, `LightingOff`, `UseBounds(False)` so it
+  never skews `ResetCamera` — degenerate at the origin until first positioned).
+  `update_plane_outline(axis, fraction)` moves the four corners; `_on_plane_preview`
+  (a `@change` on `plane_position_draft`) calls it + `ctrl.view_update()` every
+  drag tick — cheap because the rendered scene is only 2-D surfaces (the 12 M
+  volume is filter *input*, never drawn), so `view_update` sends a tiny delta.
+  Left always-on: it also marks the seeding plane while on the Streamlines/Arrows
+  tools, which softens the cut-plane-hub issue.
+- ~~**Numeric world-coordinate input**~~ — **Done 2026-08-15.** `plane_coord`
+  field, label bound to the axis (`"<AXIS> coordinate [m]"`). `plane_position`
+  stays the single source of truth (0..1); `_coord_from_fraction` /
+  `_fraction_from_coord` convert against `case.bounds()`. `_on_plane_coord` writes
+  `plane_position` from a typed coord (heavy commit via `_on_heavy`);
+  `_on_plane_sync` (`@change` on `plane_position`/`plane_axis`) writes the coord
+  and the slider draft back. The loop is broken by a value comparison
+  (`abs(frac - plane_position) > 1e-4`), not a flag — trame flushes `@change`
+  asynchronously, so a `self._syncing` guard set-then-cleared in one call would
+  not hold. Kept axis-aligned; a free plane (arbitrary normal) would be a much
+  bigger change and isn't what was asked.
 
 ### Widget re-arrangement — DONE 2026-08-15
 
@@ -413,6 +426,9 @@ rather than editing each slider; keep the cheap sliders live.
 2. ~~**Cull-front-face** and **point/cell toggle**~~ — **done 2026-08-14**.
 3. ~~**Widget re-arrangement** (+ banded colouring)~~ — **done 2026-08-15**.
 4. ~~**Crinkle slice**~~ — **done 2026-08-15**.
-5. Slider refinements: plane outline during drag, numeric XYZ plane position.
-   **← next** (the only backlog items left)
+5. ~~Slider refinements: plane outline during drag, numeric XYZ plane position.~~
+   — **done 2026-08-15**.
+
+**The backlog is now empty** (bar the optional time-slider debounce). All of it
+is server-side verified but awaits Niklas's browser confirmation.
  
