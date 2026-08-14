@@ -138,12 +138,19 @@ class FoamViz:
                 "robust_range": False,
                 "range_min": 0.0,
                 "range_max": 1.0,
-                # cut plane
+                # cut plane. Source of truth: the world point (plane_x/y/z) plus
+                # the normal axis; only the active-axis coordinate positions the
+                # cut, the other two are remembered across a normal switch. The
+                # slider (ranged by axis_min/axis_max) previews the active
+                # coordinate live and commits it on release; the fields are the
+                # truth and take effect on Apply.
                 "plane_axis": "z",
-                "plane_position": 0.5,
-                # world coordinate of the plane along the active axis (metres);
-                # a second way to place the slice, kept in step with the slider.
-                "plane_coord": 0.0,
+                "plane_x": 0.0,
+                "plane_y": 0.0,
+                "plane_z": 0.0,
+                "plane_slider": 0.0,
+                "axis_min": 0.0,
+                "axis_max": 1.0,
                 # representations
                 "surface_visible": True,
                 "surface_colored": False,
@@ -212,7 +219,7 @@ class FoamViz:
         )
 
         self._sync_drafts()  # keep debounced sliders' *_draft in step with the case
-        self._sync_plane_coord()  # bounds changed -> refresh the world-coord field
+        self._reset_plane()  # bounds changed -> recentre the plane, re-range slider
         self.pipeline.update_data()
         self._loading = False
         self._rescale()
@@ -260,8 +267,9 @@ class FoamViz:
         p.set_preset(s.preset)
         p.set_color_range(float(s.range_min), float(s.range_max))
 
-        p.update_plane(s.plane_axis, float(s.plane_position))
-        p.update_plane_outline(s.plane_axis, float(s.plane_position))
+        coord = self._active_coord()
+        p.update_plane(s.plane_axis, coord)
+        p.update_plane_outline(s.plane_axis, coord)
         p.update_surface(
             s.surface_visible,
             s.surface_colored,
@@ -300,34 +308,43 @@ class FoamViz:
         for n in _DEBOUNCED:
             setattr(self.state, f"{n}_draft", getattr(self.state, n))
 
-    # -- cut plane: fraction (0..1) <-> world coordinate --------------------
+    # -- cut plane: a world-coordinate point + a live position slider --------
+    #
+    # plane_x/y/z hold the plane point; plane_axis is the normal. Only the
+    # active-axis coordinate cuts, so everything funnels through update_scene()
+    # reading _active_coord(). The slider is a view: it previews live and, on
+    # release, writes the active coordinate and auto-applies. The fields are
+    # inert until Apply. No fraction anywhere -- world coordinates throughout.
 
     def _axis_range(self, axis):
         b = self.case.bounds()  # xmin, xmax, ymin, ymax, zmin, zmax
         i = "xyz".index(axis)
         return b[2 * i], b[2 * i + 1]
 
-    def _coord_from_fraction(self, axis, frac):
-        lo, hi = self._axis_range(axis)
-        return lo + (hi - lo) * min(max(frac, 0.0), 1.0)
+    def _active_coord(self):
+        """The plane point's coordinate along the active normal axis."""
+        return float(getattr(self.state, f"plane_{self.state.plane_axis}"))
 
-    def _fraction_from_coord(self, axis, coord):
-        lo, hi = self._axis_range(axis)
-        return 0.5 if hi <= lo else min(max((coord - lo) / (hi - lo), 0.0), 1.0)
-
-    def _sync_plane_coord(self):
-        """Refresh the world-coordinate field (and the slider draft) from the
-        committed fraction/axis/bounds — after a coord edit, an axis switch or a
-        case load. The coord field and the fraction are two views of one plane."""
+    def _reset_plane(self):
+        """Centre the plane point in the domain. On case load the bounds -- hence
+        the sensible default and the valid range -- change."""
         if self.case is None:
             return
-        if self.state.plane_position_draft != self.state.plane_position:
-            self.state.plane_position_draft = self.state.plane_position
-        coord = round(
-            self._coord_from_fraction(self.state.plane_axis, float(self.state.plane_position)), 4
-        )
-        if self.state.plane_coord != coord:
-            self.state.plane_coord = coord
+        b = self.case.bounds()
+        self.state.plane_x = round((b[0] + b[1]) / 2, 4)
+        self.state.plane_y = round((b[2] + b[3]) / 2, 4)
+        self.state.plane_z = round((b[4] + b[5]) / 2, 4)
+        self._sync_plane_ui()
+
+    def _sync_plane_ui(self):
+        """Point the slider at the active axis: range from the bounds, value from
+        the active coordinate. After a case load, an axis switch or an Apply."""
+        if self.case is None:
+            return
+        lo, hi = self._axis_range(self.state.plane_axis)
+        self.state.axis_min = round(lo, 4)
+        self.state.axis_max = round(hi, 4)
+        self.state.plane_slider = round(self._active_coord(), 4)
 
     def _rescale(self):
         """Recompute the colour range from the data, honouring the range mode."""
@@ -459,36 +476,23 @@ class FoamViz:
         self.pipeline.update_data()
         self.update_scene()
 
-    @change("plane_position_draft")
-    def _on_plane_preview(self, **_):
-        """Live, cheap preview while the position slider is dragged: move the
-        amber plane frame to the draft position without recutting. The real
-        slice/streamlines/glyphs recompute once, on release, via _on_heavy."""
+    @change("plane_slider")
+    def _on_plane_slide(self, **_):
+        """Live, cheap preview while the position slider is dragged: move the red
+        plane frame to the dragged coordinate without recutting. The slice and
+        everything seeded on the plane recompute once, on release."""
         if self._loading or self.case is None:
             return
-        self.pipeline.update_plane_outline(
-            self.state.plane_axis, float(self.state.plane_position_draft)
-        )
+        self.pipeline.update_plane_outline(self.state.plane_axis, float(self.state.plane_slider))
         self.ctrl.view_update()
 
-    @change("plane_position", "plane_axis")
-    def _on_plane_sync(self, **_):
-        # Keep the world-coord field and the slider draft in step with the
-        # committed position (needed after a coord edit or an axis switch).
+    @change("plane_axis")
+    def _on_plane_axis(self, **_):
+        # Switching the normal keeps x/y/z; re-point the slider at the new axis
+        # and redraw the cut there.
         if self._loading or self.case is None:
             return
-        self._sync_plane_coord()
-
-    @change("plane_coord")
-    def _on_plane_coord(self, plane_coord, **_):
-        """Place the plane from a typed world coordinate. Setting plane_position
-        commits it (heavy, via _on_heavy) and echoes back through _on_plane_sync;
-        the fraction comparison absorbs that echo so it does not loop."""
-        if self._loading or self.case is None:
-            return
-        frac = self._fraction_from_coord(self.state.plane_axis, float(plane_coord or 0.0))
-        if abs(frac - float(self.state.plane_position)) > 1e-4:
-            self.state.plane_position = round(frac, 6)
+        self.plane_apply()
 
     @change("color_field", "color_component", "robust_range")
     def _on_field(self, **_):
@@ -505,9 +509,9 @@ class FoamViz:
         self.update_scene()
 
     # Heavy: recompute geometry (recut/clip, contour/streamline/glyph filters).
+    # The cut plane is not here -- it commits through plane_apply / the slider
+    # release / an axis switch, all of which route to update_scene themselves.
     @change(
-        "plane_axis",
-        "plane_position",
         "surface_clip",
         "contour_visible",
         "contour_count",
@@ -552,6 +556,29 @@ class FoamViz:
     @controller.set("rescale")
     def rescale(self):
         self._busy_call(self._do_field)
+
+    @controller.set("plane_apply")
+    def plane_apply(self):
+        """Redraw the slice at the current plane point (the X/Y/Z fields). Heavy,
+        so it goes behind the busy overlay. Also the auto-apply after a slider
+        release and an axis switch."""
+        self._busy_call(self._do_plane_apply)
+
+    @controller.set("plane_slider_release")
+    def plane_slider_release(self):
+        """Slider let go: the dragged value becomes the active coordinate (the
+        source of truth), then auto-apply."""
+        axis = self.state.plane_axis
+        setattr(self.state, f"plane_{axis}", round(float(self.state.plane_slider), 4))
+        self.plane_apply()
+
+    def _do_plane_apply(self):
+        axis = self.state.plane_axis
+        lo, hi = self._axis_range(axis)
+        coord = min(max(self._active_coord(), lo), hi)  # clamp typed values into range
+        setattr(self.state, f"plane_{axis}", round(coord, 4))
+        self._sync_plane_ui()  # reflect the applied coordinate on the slider
+        self.update_scene()
 
     @controller.set("set_view")
     def set_view(self, direction):
@@ -851,15 +878,38 @@ class FoamViz:
                 v3.VBtn("X", value="x", size="small")
                 v3.VBtn("Y", value="y", size="small")
                 v3.VBtn("Z", value="z", size="small")
-            _slider("plane_position", "Position", 0.0, 1.0, 0.005, debounce=True)
-            # Exact placement by world coordinate along the active axis (metres).
-            v3.VTextField(
-                v_model_number=("plane_coord", 0.0),
-                label=("plane_axis.toUpperCase() + ' coordinate [m]'",),
-                type="number",
-                step=0.05,
-                classes="mt-1 js-plane-coord",
-                **_FIELD,
+            # Position along the active axis. The slider previews live (the red
+            # frame follows) and commits on release; the X/Y/Z fields below are
+            # the source of truth and take effect on Apply.
+            with html.Div(classes="d-flex justify-space-between mt-1"):
+                html.Span("Position", classes="text-caption text-medium-emphasis")
+                html.Span(
+                    "{{ Number(plane_slider).toFixed(2) }} m", classes="text-caption"
+                )
+            v3.VSlider(
+                v_model=("plane_slider",),
+                min=("axis_min",),
+                max=("axis_max",),
+                step=("Math.max((axis_max - axis_min) / 500, 0.001)",),
+                end=(self.ctrl.plane_slider_release,),
+                hide_details=True,
+                density="compact",
+                color="primary",
+                thumb_size=12,
+                classes="js-plane-slider",
+            )
+            with html.Div(classes="d-flex mt-2", style="gap: 6px"):
+                v3.VTextField(v_model_number=("plane_x", 0.0), label="X", type="number",
+                              classes="js-plane-x", **_FIELD)
+                v3.VTextField(v_model_number=("plane_y", 0.0), label="Y", type="number", **_FIELD)
+                v3.VTextField(v_model_number=("plane_z", 0.0), label="Z", type="number", **_FIELD)
+            v3.VBtn(
+                "Apply",
+                block=True,
+                variant="tonal",
+                size="small",
+                classes="mt-2 js-plane-apply",
+                click=self.ctrl.plane_apply,
             )
             v3.VDivider(classes="my-3")
             _switch("slice_visible", "Show slice")
@@ -1097,7 +1147,6 @@ def _format_ticks(values):
 # runs once on release, not on every tick of a drag. Each gets a `<name>_draft`
 # mirror in the state; _sync_drafts() keeps it aligned on programmatic changes.
 _DEBOUNCED = (
-    "plane_position",
     "contour_count",
     "stream_seeds",
     "stream_length",

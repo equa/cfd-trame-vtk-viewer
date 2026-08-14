@@ -300,13 +300,15 @@ All of the below shipped (see "Widget re-arrangement — DONE" implementation no
 
 - ~~Delay slider actions until the slider is released.~~ **Done 2026-08-14** for
   the heavy geometry sliders (see "Slider debounce — DONE" above).
-    - ~~Draw a plane outline that follows the slider during the drag.~~ **Done
-      2026-08-15** — amber plane frame (`plane_outline`), moved live on the draft
-      by `_on_plane_preview` without recutting; also marks the seeding plane from
-      any tool.
-    - ~~Numeric input for the plane position in world coordinates.~~ **Done
-      2026-08-15** — the "&lt;axis&gt; coordinate [m]" field (`plane_coord`), kept
-      in step with the slider both ways.
+    - ~~Draw a plane outline that follows the slider during the drag.~~ **Done** —
+      the red plane frame (`plane_outline`), moved live on the slider by
+      `_on_plane_slide` without recutting; also marks the seeding plane from any
+      tool.
+    - ~~Numeric input for the plane position in world coordinates.~~ **Done, then
+      reworked 2026-08-16** into X/Y/Z world-point fields + an Apply button, with
+      the world point (not a fraction) as the source of truth — see the plane
+      note under implementation notes. Fields are inert until Apply; the slider
+      previews live and auto-applies on release; a normal switch keeps X/Y/Z.
     - (Optional, not done) debounce the time slider too — see the note in the
       "Slider debounce — DONE" section.
 
@@ -340,26 +342,33 @@ flashes the overlay every tick, since `plane_position`/`contour_count`/
 `app.py` is shared by every panel, so add a `debounce=True` parameter to it
 rather than editing each slider; keep the cheap sliders live.
 
-- ~~**Plane outline following the drag**~~ — **Done 2026-08-15.** `plane_outline`
-  (four points + a line loop, amber, `LightingOff`, `UseBounds(False)` so it
-  never skews `ResetCamera` — degenerate at the origin until first positioned).
-  `update_plane_outline(axis, fraction)` moves the four corners; `_on_plane_preview`
-  (a `@change` on `plane_position_draft`) calls it + `ctrl.view_update()` every
-  drag tick — cheap because the rendered scene is only 2-D surfaces (the 12 M
-  volume is filter *input*, never drawn), so `view_update` sends a tiny delta.
-  Left always-on: it also marks the seeding plane while on the Streamlines/Arrows
-  tools, which softens the cut-plane-hub issue.
-- ~~**Numeric world-coordinate input**~~ — **Done 2026-08-15.** `plane_coord`
-  field, label bound to the axis (`"<AXIS> coordinate [m]"`). `plane_position`
-  stays the single source of truth (0..1); `_coord_from_fraction` /
-  `_fraction_from_coord` convert against `case.bounds()`. `_on_plane_coord` writes
-  `plane_position` from a typed coord (heavy commit via `_on_heavy`);
-  `_on_plane_sync` (`@change` on `plane_position`/`plane_axis`) writes the coord
-  and the slider draft back. The loop is broken by a value comparison
-  (`abs(frac - plane_position) > 1e-4`), not a flag — trame flushes `@change`
-  asynchronously, so a `self._syncing` guard set-then-cleared in one call would
-  not hold. Kept axis-aligned; a free plane (arbitrary normal) would be a much
-  bigger change and isn't what was asked.
+The cut-plane controls were then **reworked (2026-08-16)** into a single clean
+model — the earlier fraction/`plane_coord` bidirectional sync was fiddly. Now:
+
+- **Source of truth = the world point `plane_x`/`plane_y`/`plane_z` + the normal
+  `plane_axis`.** Only the active-axis coordinate positions the cut (the plane is
+  axis-aligned); the other two are remembered, so switching the normal keeps
+  them. `_active_coord()` reads `plane_<axis>`; everything funnels through
+  `update_scene()`, which passes it to `update_plane`/`update_plane_outline`
+  (both now take a **world coordinate**, not a fraction — no fractions anywhere).
+- **The X/Y/Z fields are inert** (no `@change`) until **Apply** (`plane_apply` →
+  `_busy_call(_do_plane_apply)`), which clamps into range, reflects the value on
+  the slider (`_sync_plane_ui`) and redraws. That is the "debounce" for typed
+  input — keystrokes never redraw.
+- **The slider is a view** on the active axis (`plane_slider`, ranged by
+  `axis_min`/`axis_max`). Dragging fires `_on_plane_slide` → moves the red frame
+  only (`ctrl.view_update`, cheap: only 2-D surfaces are ever drawn, the 12 M
+  volume is filter *input*). Release (`@end` → `ctrl.plane_slider_release`)
+  writes the active coordinate and auto-applies.
+- **Axis switch** (`_on_plane_axis`) just calls `plane_apply`, which re-ranges the
+  slider to the new axis and redraws — X/Y/Z untouched.
+- **`plane_outline`**: four points + a line loop, **red** (legible on a future
+  light theme), `LightingOff`, `UseBounds(False)` so its origin-anchored initial
+  points can't skew `ResetCamera` (that was making the render flaky). Always-on,
+  so it also marks the seeding plane from the Streamlines/Arrows tools.
+- Kept axis-aligned; a free plane (arbitrary normal) would be a much bigger
+  change and isn't what was asked. Fields take decimals (a slice needs sub-metre
+  precision), not integers.
 
 ### Widget re-arrangement — DONE 2026-08-15
 

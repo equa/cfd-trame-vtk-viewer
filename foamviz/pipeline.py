@@ -121,7 +121,8 @@ class FoamPipeline:
         )
         self.plane_outline_mapper.SetInputData(self.plane_outline)
         pop = self.plane_outline_actor.GetProperty()
-        pop.SetColor(0.95, 0.75, 0.20)
+        # Red rather than amber: stays legible against a future light theme.
+        pop.SetColor(0.90, 0.20, 0.20)
         pop.SetLineWidth(2)
         pop.LightingOff()
         # Always within the domain (a cross-section), so keep it out of
@@ -399,21 +400,22 @@ class FoamPipeline:
 
     # -- representations ---------------------------------------------------
 
-    def _plane_position(self, axis, fraction):
-        """World coordinate of the plane along *axis* at *fraction* of the bounds.
-        Nudged off the exact boundary: a cut on the outer face is degenerate."""
-        lo, hi = self._axis_range(axis)
-        return lo + (hi - lo) * min(max(fraction, 0.001), 0.999)
-
     def _axis_range(self, axis):
         b = self.case.bounds()  # xmin, xmax, ymin, ymax, zmin, zmax
         i = "xyz".index(axis)
         return b[2 * i], b[2 * i + 1]
 
-    def update_plane(self, axis, fraction):
-        """Position the shared cut/clip plane along *axis* at *fraction* of the bounds."""
+    def _clamp_to_axis(self, axis, coord):
+        """Keep the plane just inside the bounds: a cut on the exact outer face
+        is degenerate and flickers."""
+        lo, hi = self._axis_range(axis)
+        eps = (hi - lo) * 1e-3
+        return min(max(coord, lo + eps), hi - eps)
+
+    def update_plane(self, axis, coord):
+        """Position the shared cut/clip plane at world *coord* along *axis*."""
         xmin, xmax, ymin, ymax, zmin, zmax = self.case.bounds()
-        pos = self._plane_position(axis, fraction)
+        pos = self._clamp_to_axis(axis, coord)
 
         origin = [(xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2]
         origin["xyz".index(axis)] = pos
@@ -423,10 +425,10 @@ class FoamPipeline:
             plane.SetOrigin(*origin)
             plane.SetNormal(*normal)
 
-    def update_plane_outline(self, axis, fraction):
-        """Move the amber plane frame to *fraction* along *axis* -- four points,
-        no recut, so it is cheap enough to follow a slider drag live."""
-        pos = self._plane_position(axis, fraction)
+    def update_plane_outline(self, axis, coord):
+        """Move the plane frame to world *coord* along *axis* -- four points, no
+        recut, so it is cheap enough to follow a slider drag live."""
+        pos = self._clamp_to_axis(axis, coord)
         ai = "xyz".index(axis)
         others = [i for i in range(3) if i != ai]
         b = self.case.bounds()

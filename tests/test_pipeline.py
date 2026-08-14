@@ -86,7 +86,8 @@ def main():
     lo, hi = pipe.autoscale()
     check("autoscale matches the reader", (lo, hi) == (ulo, uhi), f"{lo:.4f}..{hi:.4f}")
 
-    pipe.update_plane("z", 0.5)
+    zmid = sum(case.bounds()[4:6]) / 2  # world coordinate of the mid-height cut
+    pipe.update_plane("z", zmid)
     pipe.cutter.Update()
     check("slice has cells", pipe.cutter.GetOutput().GetNumberOfCells() > 1000,
           f"{pipe.cutter.GetOutput().GetNumberOfCells()} cells")
@@ -100,13 +101,11 @@ def main():
           crink.GetPointData().GetArray(COLOR_ARRAY) is not None)
 
     # plane outline: four coplanar corners at the cut height (cheap drag preview)
-    pipe.update_plane_outline("z", 0.5)
+    pipe.update_plane_outline("z", zmid)
     op = pipe.plane_outline.GetPoints()
-    zbounds = case.bounds()[4:6]
     zs = {round(op.GetPoint(i)[2], 6) for i in range(4)}
     check("plane outline is planar", len(zs) == 1, str(zs))
-    mid_z = zbounds[0] + (zbounds[1] - zbounds[0]) * 0.5
-    check("plane outline sits at the cut height", abs(next(iter(zs)) - mid_z) < 1e-6)
+    check("plane outline sits at the cut height", abs(next(iter(zs)) - zmid) < 1e-6)
 
     pipe.update_surface(True, True, 0.3, False, True, False)
     pipe.surface_clip.Update()
