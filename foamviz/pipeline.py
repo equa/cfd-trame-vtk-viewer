@@ -38,6 +38,9 @@ class FoamPipeline:
         self.vector_field = None
         self.color_range = (0.0, 1.0)
         self.preset = "coolwarm"
+        # Colour the surface/slice by true cell values (flat per cell) rather
+        # than the reader's point-interpolated (smooth) values.
+        self.use_cell_data = False
 
         self._build_scene()
         self._build_filters()
@@ -289,20 +292,41 @@ class FoamPipeline:
         self._place_triad()
 
     def apply_color_array(self):
-        """Bake the selected field/component into ``COLOR_ARRAY`` everywhere."""
+        """Bake the selected field/component into ``COLOR_ARRAY``.
+
+        Point data is always baked: isosurfaces, streamlines, glyphs and the
+        smooth surface/slice colouring all read the point array. Cell data is
+        baked too only when :attr:`use_cell_data` is set, so the surface and
+        slice can show true, un-interpolated cell values (the cutter carries
+        cell data through to the cut faces)."""
         if self.case is None or not self.color_field:
             return
         for dataset in self.case.datasets():
-            pd = dataset.GetPointData()
-            source = pd.GetArray(self.color_field)
-            if source is None:
-                continue
-            scalars = derive_scalars(vtk_to_numpy(source), self.color_component)
-            baked = numpy_to_vtk(np.ascontiguousarray(scalars, dtype=np.float64), deep=1)
-            baked.SetName(COLOR_ARRAY)
-            pd.RemoveArray(COLOR_ARRAY)
-            pd.AddArray(baked)
-            pd.SetActiveScalars(COLOR_ARRAY)
+            self._bake_color(dataset.GetPointData())
+            if self.use_cell_data:
+                self._bake_color(dataset.GetCellData())
+
+    def _bake_color(self, attr):
+        """Bake ``COLOR_ARRAY`` into one attribute set (point or cell data)."""
+        source = attr.GetArray(self.color_field)
+        if source is None:
+            return
+        scalars = derive_scalars(vtk_to_numpy(source), self.color_component)
+        baked = numpy_to_vtk(np.ascontiguousarray(scalars, dtype=np.float64), deep=1)
+        baked.SetName(COLOR_ARRAY)
+        attr.RemoveArray(COLOR_ARRAY)
+        attr.AddArray(baked)
+        attr.SetActiveScalars(COLOR_ARRAY)
+
+    def _color_by_association(self, mapper):
+        """Point the mapper at ``COLOR_ARRAY`` in point or cell data per the
+        current :attr:`use_cell_data`. Only the surface and slice honour the
+        toggle; the derived filters always need point data."""
+        if self.use_cell_data:
+            mapper.SetScalarModeToUseCellFieldData()
+        else:
+            mapper.SetScalarModeToUsePointFieldData()
+        mapper.SelectColorArray(COLOR_ARRAY)
 
     # -- appearance -------------------------------------------------------
 
@@ -346,19 +370,23 @@ class FoamPipeline:
             plane.SetOrigin(*origin)
             plane.SetNormal(*normal)
 
-    def update_surface(self, visible, colored, opacity, edges, clip):
+    def update_surface(self, visible, colored, opacity, edges, clip, cull):
         self.surface_actor.SetVisibility(1 if visible else 0)
         self.surface_mapper.SetInputConnection(
             self.surface_clip.GetOutputPort() if clip else self.surface_input.GetOutputPort()
         )
         self.surface_mapper.SetScalarVisibility(1 if colored else 0)
+        self._color_by_association(self.surface_mapper)
         prop = self.surface_actor.GetProperty()
         prop.SetOpacity(opacity)
         prop.SetEdgeVisibility(1 if edges else 0)
         prop.SetEdgeColor(0.25, 0.27, 0.32)
+        # Cull the camera-facing walls so you can see into the room.
+        prop.SetFrontfaceCulling(1 if cull else 0)
 
     def update_slice(self, visible, edges):
         self.slice_actor.SetVisibility(1 if visible else 0)
+        self._color_by_association(self.slice_mapper)
         prop = self.slice_actor.GetProperty()
         prop.SetEdgeVisibility(1 if edges else 0)
         prop.SetEdgeColor(0.2, 0.2, 0.24)

@@ -91,12 +91,34 @@ def main():
     check("slice has cells", pipe.cutter.GetOutput().GetNumberOfCells() > 1000,
           f"{pipe.cutter.GetOutput().GetNumberOfCells()} cells")
 
-    pipe.update_surface(True, True, 0.3, False, True)
+    pipe.update_surface(True, True, 0.3, False, True, False)
     pipe.surface_clip.Update()
     clipped = pipe.surface_clip.GetOutput().GetNumberOfCells()
     pipe.surface_input.Update()
     whole = pipe.surface_input.GetOutput().GetNumberOfCells()
     check("clip removes part of the shell", 0 < clipped < whole, f"{clipped}/{whole}")
+
+    # cull front faces — a render-only actor property
+    pipe.update_surface(True, True, 0.3, False, False, True)
+    check("cull enables front-face culling",
+          pipe.surface_actor.GetProperty().GetFrontfaceCulling() == 1)
+    pipe.update_surface(True, True, 0.3, False, False, False)
+    check("no cull leaves front faces",
+          pipe.surface_actor.GetProperty().GetFrontfaceCulling() == 0)
+
+    # true cell values — bake a cell COLOR array and colour by it
+    pipe.use_cell_data = True
+    pipe.apply_color_array()
+    pipe.update_surface(True, True, 0.3, False, False, False)
+    check("cell mode bakes a cell colour array",
+          case.internal.GetCellData().GetArray(COLOR_ARRAY) is not None)
+    check("surface colours by cell data",
+          pipe.surface_mapper.GetScalarModeAsString() == "UseCellFieldData")
+    pipe.use_cell_data = False
+    pipe.apply_color_array()
+    pipe.update_surface(True, True, 0.3, False, False, False)
+    check("point mode colours by point data",
+          pipe.surface_mapper.GetScalarModeAsString() == "UsePointFieldData")
 
     pipe.update_contour(True, 4, 0.4)
     pipe.contour.Update()

@@ -311,8 +311,13 @@ does not necessarily reflect a good implementation order.
 
 ### Visualisation options
 
-- Boundary visualisation: default to "cull front face", with a toggle.
-- Toggle between point-interpolated values and true cell values.
+- ~~Boundary visualisation: default to "cull front face", with a toggle.~~
+  **Done 2026-08-14** — "Cull near walls" switch in the Room shell panel,
+  default on (`surface_cull` → `SetFrontfaceCulling`).
+- ~~Toggle between point-interpolated values and true cell values.~~
+  **Done 2026-08-14** — "True cell values" switch in the Colour panel
+  (`use_cell_data`); bakes a cell `FoamVizColor` and switches the surface/slice
+  mapper association. Contour/streamlines/glyphs stay on point data.
 - Slice-plane visualisation: when the mesh is shown, switch to a "crinkle slice"
   — show the whole layer of intersected cells with the mesh, i.e. the true mesh,
   not a triangulated slice.
@@ -371,18 +376,16 @@ rather than editing each slider; keep the cheap sliders live.
 
 ### Visualisation options
 
-- **Cull front face:** `surface_actor.GetProperty().SetFrontfaceCulling(1)` on
-  the boundary shell lets you see into the room. Add a `boundary_cull` state var
-  (default True, per request) and set it in the pipeline. It's a render-only
-  property, so it belongs in the "cheap"/live handler group, not behind the
-  overlay.
-- **Point-interpolated vs true cell values:** the reader already builds point
-  data (`SetCreateCellToPoint(1)` in `case.py`); the surface mapper currently
-  uses `SetScalarModeToUsePointFieldData()`. Toggle the mapper between point and
-  cell scalar mode and bake `FoamVizColor` on the matching association
-  (`apply_color_array`). **Scope it to the surface/slice colouring only** —
-  contour (marching cubes) and streamlines need *point* scalars/vectors and
-  can't run off cell data.
+- ~~**Cull front face**~~ — **Done.** `surface_cull` (default True) →
+  `surface_actor.GetProperty().SetFrontfaceCulling`, in the cheap/live handler.
+- ~~**Point-interpolated vs true cell values**~~ — **Done.** `use_cell_data`
+  (cheap handler). `apply_color_array` bakes `FoamVizColor` into point data
+  always, and into cell data too when the toggle is on; `_color_by_association`
+  switches the surface/slice mapper between `UsePointFieldData` and
+  `UseCellFieldData`. Cell arrays were verified present on the internal mesh,
+  boundary patches, and the cutter output. Contour/streamlines/glyphs keep
+  reading the point array. (Note: auto-range still samples point data — a cell
+  extreme can slightly exceed it; not worth special-casing.)
 - **Crinkle slice:** the biggest lift. The slice is a `vtkCutter` (triangulated
   planar cut); a crinkle slice keeps whole cells the plane passes through.
   Implement by evaluating the plane's signed distance at each cell's points and
@@ -392,10 +395,9 @@ rather than editing each slider; keep the cheap sliders live.
 
 ### Suggested order
 
-1. **Slider debounce** (+ plane outline, numeric XYZ) — foundational, biggest
-   felt win, and it pairs directly with the busy overlay.
-2. **Cull-front-face** and **point/cell toggle** — small and independent.
+1. ~~**Slider debounce**~~ — **done** (core; plane outline + numeric XYZ remain).
+2. ~~**Cull-front-face** and **point/cell toggle**~~ — **done 2026-08-14**.
 3. **Widget re-arrangement** (+ banded colouring) — one focused UI pass; settle
-   the cut-plane-hub question first.
+   the cut-plane-hub question first. **← next**
 4. **Crinkle slice** — self-contained but the largest single feature.
  

@@ -109,6 +109,8 @@ class FoamViz:
                 "color_field": None,
                 "color_component": "magnitude",
                 "component_enabled": False,
+                # Colour by true (flat) cell values instead of point-interpolated.
+                "use_cell_data": False,
                 "preset": "coolwarm",
                 "preset_items": colors.preset_items(),
                 "legend_gradient": colors.css_gradient("coolwarm"),
@@ -130,6 +132,8 @@ class FoamViz:
                 "surface_opacity": 0.12,
                 "surface_edges": False,
                 "surface_clip": False,
+                # Cull camera-facing walls by default, so you see into the room.
+                "surface_cull": True,
                 "slice_visible": True,
                 "slice_edges": False,
                 "contour_visible": False,
@@ -228,6 +232,7 @@ class FoamViz:
         p.color_field = s.color_field
         p.color_component = s.color_component
         p.vector_field = s.vector_field
+        p.use_cell_data = bool(s.use_cell_data)
         p.apply_color_array()
         if self.case.vector_field_available(s.vector_field):
             self.case.internal.GetPointData().SetActiveVectors(s.vector_field)
@@ -242,6 +247,7 @@ class FoamViz:
             float(s.surface_opacity),
             s.surface_edges,
             s.surface_clip,
+            s.surface_cull,
         )
         p.update_slice(s.slice_visible, s.slice_edges)
         p.update_contour(s.contour_visible, int(s.contour_count), float(s.contour_opacity))
@@ -440,10 +446,12 @@ class FoamViz:
         "preset",
         "range_min",
         "range_max",
+        "use_cell_data",
         "surface_visible",
         "surface_colored",
         "surface_opacity",
         "surface_edges",
+        "surface_cull",
         "slice_visible",
         "slice_edges",
         "contour_opacity",
@@ -729,6 +737,7 @@ class FoamViz:
                     hide_details=True,
                     color="primary",
                 )
+            _switch("use_cell_data", "True cell values")
             with html.Div(classes="d-flex mt-3", style="gap: 8px"):
                 v3.VTextField(
                     v_model_number=("range_min", 0.0),
@@ -778,6 +787,7 @@ class FoamViz:
         with _panel("Room shell", "mdi-cube-outline"):
             _switch("surface_visible", "Show boundary patches")
             _switch("surface_colored", "Colour by field")
+            _switch("surface_cull", "Cull near walls")
             _switch("surface_clip", "Cut away at plane")
             _switch("surface_edges", "Mesh edges")
             _slider("surface_opacity", "Opacity", 0.0, 1.0, 0.01)
