@@ -628,6 +628,14 @@ class FoamViz:
             "range": [float(self.state.range_min), float(self.state.range_max)],
             "preset": self.state.preset,
             "n_colors": int(self.state.n_colors or 0),
+            "unit": _FIELD_UNITS.get(self.state.color_field, ""),
+            # The report has no access to the LUT, and the poster PNG shows only
+            # the 3D view (not the legend), so ship the exact colour bar with the
+            # figure: the same gradient + ticks the on-screen legend uses.
+            "gradient": colors.css_gradient(
+                self.state.preset, n_colors=int(self.state.n_colors or 0)
+            ),
+            "ticks": list(self.state.legend_ticks),
         }
         (report_dir / f"{stem}.json").write_text(json.dumps(meta, indent=2))
         log.info("added %s to case report at %s", stem, report_dir)
