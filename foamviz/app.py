@@ -222,6 +222,13 @@ class FoamViz:
                 "patch_items": self.case.patches,
                 "selected_patches": list(self.case.patches),
                 "case_info": self._case_info_text(),
+                # Start every case with the heavy representations off. Otherwise a
+                # big case inherits streamlines/isosurfaces/arrows left on from the
+                # previous case and rebuilds them all on load -- slow, and enough
+                # to hang or crash the viewer. The cheap slice stays on.
+                "contour_visible": False,
+                "stream_visible": False,
+                "glyph_visible": False,
             }
         )
 
