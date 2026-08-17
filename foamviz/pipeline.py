@@ -440,6 +440,19 @@ class FoamPipeline:
 
     # -- appearance -------------------------------------------------------
 
+    def set_theme(self, light):
+        """Switch the 3D viewport for a light or dark UI theme: background and
+        the neutral geometry line colour (which must invert to stay visible).
+        Field-coloured actors follow the colour map and need no change."""
+        if light:
+            self.renderer.SetBackground(0.99, 0.99, 1.0)
+            self.renderer.SetBackground2(0.90, 0.92, 0.96)
+            self.geometry_actor.GetProperty().SetColor(0.15, 0.17, 0.22)
+        else:
+            self.renderer.SetBackground(0.09, 0.10, 0.13)
+            self.renderer.SetBackground2(0.17, 0.19, 0.24)
+            self.geometry_actor.GetProperty().SetColor(0.85, 0.87, 0.92)
+
     def set_light_kit(self, enabled):
         """Toggle the light kit. Off falls back to VTK's default single camera
         headlight (auto-created when the renderer has no lights of its own)."""

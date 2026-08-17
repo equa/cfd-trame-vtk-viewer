@@ -223,6 +223,26 @@ buoyancy-driven room airflow with a thermal plume, steady state.
 - **The always-on domain outline box (`vtkOutlineFilter`) was removed** — the
   building geometry is the context now.
 
+## Light/dark theme (2026-08-17)
+
+The embedding app (cfd-frontend) drives the theme via `?theme=light|dark` on the
+iframe URL. FoamViz is a shared single session (UI built once), so the theme
+switches **reactively**, not by rebuild:
+
+- `ui_theme` state is bound to `<VApp :theme>` (the layout is built with
+  `theme=("ui_theme",)`, which renders `:theme="ui_theme"` — verified), so the
+  whole Vuetify chrome (drawer/toolbar/controls) re-themes at runtime.
+- The floating overlays (legend, bottom bar, mode switch, section headers) are
+  styled with Vuetify's theme CSS vars — `rgba(var(--v-theme-surface), …)` /
+  `rgb(var(--v-theme-on-surface))` — so they follow the same switch with no
+  per-theme CSS.
+- The 3D viewport is VTK, not CSS: `pipeline.set_theme(light)` flips the
+  renderer background and **inverts the neutral geometry line colour** (light
+  lines on dark, dark on light — field-coloured actors need no change).
+- The `?theme` middleware (beside `?case` in `_add_http_routes`) calls
+  `_set_theme`, which sets `ui_theme` + calls `pipeline.set_theme` + re-renders.
+  Default is dark.
+
 ## Architecture in one paragraph
 
 `case.py` wraps `vtkOpenFOAMReader` and hands out **snapshots** — concrete

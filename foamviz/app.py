@@ -158,6 +158,9 @@ class FoamViz:
                 "busy": False,
                 # which widget tool's controls the drawer is showing (see TOOLS)
                 "active_tool": "cutplane",
+                # UI theme, driven by the embedding app via ?theme=light|dark.
+                # Bound to the layout's <VApp :theme>, so it switches at runtime.
+                "ui_theme": "dark",
                 # "Add to case report" — caption for the next figure + a snackbar
                 "report_caption": "",
                 "report_msg": "",
@@ -564,6 +567,21 @@ class FoamViz:
         except Exception:
             log.exception("preselect(%r) failed", name)
 
+    def _set_theme(self, theme):
+        """Apply a light/dark UI theme (the ``?theme=`` hook). The Vuetify chrome
+        follows the ``ui_theme`` state (bound to ``<VApp :theme>``) and the
+        overlays follow Vuetify's theme CSS vars; here we also flip the 3D
+        viewport — background and the neutral geometry line colour. Runs via
+        call_soon, so it logs its own errors."""
+        try:
+            light = theme == "light"
+            with self.state:
+                self.state.ui_theme = "light" if light else "dark"
+            self.pipeline.set_theme(light)
+            self.ctrl.view_update()
+        except Exception:
+            log.exception("set_theme(%r) failed", theme)
+
     @change("time_index")
     def _on_time(self, time_index, **_):
         if self._loading or self.case is None:
@@ -904,6 +922,9 @@ class FoamViz:
             name = request.query.get("case")
             if name:
                 asyncio.get_running_loop().call_soon(self._preselect, name)
+            theme = request.query.get("theme")
+            if theme in ("light", "dark"):
+                asyncio.get_running_loop().call_soon(self._set_theme, theme)
             return response
 
         wslink_server.app.middlewares.append(preselect_case)
@@ -911,9 +932,9 @@ class FoamViz:
     # ------------------------------------------------------------------- UI
 
     def _build_ui(self):
-        # Dark throughout: the 3D view is dark by necessity, and a light chrome
-        # around it makes every colour-mapped result look washed out.
-        with SinglePageWithDrawerLayout(self.server, width=340, theme="dark") as layout:
+        # Theme follows ui_theme (dark by default), switched at runtime via the
+        # ?theme= hook; see "Light/dark theme" in CLAUDE.md.
+        with SinglePageWithDrawerLayout(self.server, width=340, theme=("ui_theme",)) as layout:
             self.ui = layout
             layout.title.set_text("FoamViz")
             client.Style(_CSS)
@@ -1352,7 +1373,6 @@ class FoamViz:
                 density="compact",
                 variant="outlined",
                 divided=True,
-                bg_color="rgba(16,18,24,.72)",
             ):
                 v3.VBtn("Client", value="local", size="x-small")
                 v3.VBtn("Server", value="remote", size="x-small")
@@ -1494,18 +1514,22 @@ def _section(title, icon):
 
 
 _CSS = """
+/* Overlay chrome uses Vuetify's theme CSS vars (surface / on-surface), so the
+   floating boxes follow the <VApp :theme> light/dark switch automatically. */
 .foamviz-stage { position: relative; width: 100%; height: 100%; }
 .foamviz-legend {
   position: absolute; left: 18px; bottom: 18px; z-index: 5;
-  background: rgba(16,18,24,.72); border: 1px solid rgba(255,255,255,.10);
+  background: rgba(var(--v-theme-surface), .82);
+  border: 1px solid rgba(var(--v-theme-on-surface), .12);
   border-radius: 8px; padding: 10px 12px; backdrop-filter: blur(6px);
-  color: #e8eaf0; font-size: 11px; line-height: 1.5; pointer-events: none;
+  color: rgb(var(--v-theme-on-surface)); font-size: 11px; line-height: 1.5;
+  pointer-events: none;
 }
 .foamviz-legend-title { font-weight: 600; letter-spacing: .03em; margin-bottom: 6px; }
 .foamviz-legend-body { display: flex; gap: 8px; }
 .foamviz-legend-bar {
   width: 14px; height: 150px; border-radius: 3px;
-  border: 1px solid rgba(255,255,255,.18);
+  border: 1px solid rgba(var(--v-theme-on-surface), .3);
 }
 .foamviz-legend-ticks {
   display: flex; flex-direction: column; justify-content: space-between;
@@ -1516,18 +1540,25 @@ _CSS = """
 .foamviz-axis-key .ax-x { color: #e64d4d; }
 .foamviz-axis-key .ax-y { color: #66d966; }
 .foamviz-axis-key .ax-z { color: #598cf2; }
-.foamviz-mode { position: absolute; right: 18px; bottom: 18px; z-index: 5; }
+.foamviz-mode {
+  position: absolute; right: 18px; bottom: 18px; z-index: 5;
+  background: rgba(var(--v-theme-surface), .82);
+  border: 1px solid rgba(var(--v-theme-on-surface), .12);
+  border-radius: 10px; padding: 4px; backdrop-filter: blur(6px);
+}
 .foamviz-bottombar {
   position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
   z-index: 5; display: flex; align-items: center; gap: 4px;
-  background: rgba(16,18,24,.72); border: 1px solid rgba(255,255,255,.10);
+  background: rgba(var(--v-theme-surface), .82);
+  border: 1px solid rgba(var(--v-theme-on-surface), .12);
   border-radius: 10px; padding: 6px 10px; backdrop-filter: blur(6px);
 }
 .foamviz-section { margin: 10px 6px; }
 .foamviz-section-head {
   display: flex; align-items: center; padding: 10px 4px 6px;
-  font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #c8ccd6;
-  border-top: 1px solid rgba(255,255,255,.07);
+  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  color: rgb(var(--v-theme-on-surface));
+  border-top: 1px solid rgba(var(--v-theme-on-surface), .09);
 }
 .foamviz-section-body { padding: 2px 4px 6px; }
 """
