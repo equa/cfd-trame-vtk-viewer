@@ -208,8 +208,13 @@ class FoamPipeline:
         self.glyph_mapper.SetInputConnection(self.glyph.GetOutputPort())
 
         # --- building geometry (OBJ from constant/triSurface) --------------
-        # Static context geometry, read once per case (set_geometry_file). Shown
-        # as feature edges (a clean architectural line drawing) or as wireframe.
+        # Static context geometry, read once per case (set_case). Feature edges
+        # (a clean architectural line drawing) or wireframe.
+        #
+        # TWO fixed-input actors toggled by visibility, NOT one actor whose mapper
+        # input + representation we swap live: swapping them corrupts the vtk.js
+        # client (after a wireframe round-trip, feature edges came back as a
+        # jumble of filled triangles -- the synchronizer kept the stale input).
         self.has_geometry = False
         self.geometry_reader = vtk.vtkOBJReader()
         self.geometry_features = vtk.vtkFeatureEdges()
@@ -219,11 +224,19 @@ class FoamPipeline:
         self.geometry_features.SetFeatureAngle(30)
         self.geometry_features.ManifoldEdgesOff()
         self.geometry_features.NonManifoldEdgesOff()
-        self.geometry_actor, self.geometry_mapper = self._make_actor(scalar_visibility=False)
-        gprop = self.geometry_actor.GetProperty()
-        gprop.SetColor(0.85, 0.87, 0.92)
-        gprop.LightingOff()
-        self.geometry_actor.SetVisibility(0)
+
+        self.geometry_edges_actor, self.geometry_edges_mapper = self._make_actor(
+            scalar_visibility=False)
+        self.geometry_edges_mapper.SetInputConnection(self.geometry_features.GetOutputPort())
+        self.geometry_wire_actor, self.geometry_wire_mapper = self._make_actor(
+            scalar_visibility=False)
+        self.geometry_wire_mapper.SetInputConnection(self.geometry_reader.GetOutputPort())
+        self.geometry_wire_actor.GetProperty().SetRepresentationToWireframe()
+        for actor in (self.geometry_edges_actor, self.geometry_wire_actor):
+            prop = actor.GetProperty()
+            prop.SetColor(0.85, 0.87, 0.92)
+            prop.LightingOff()
+            actor.SetVisibility(0)
 
         # --- orientation triad ---------------------------------------------
         self.triad_actors = self._build_triad()
@@ -235,7 +248,8 @@ class FoamPipeline:
             self.contour_actor,
             self.stream_actor,
             self.glyph_actor,
-            self.geometry_actor,
+            self.geometry_edges_actor,
+            self.geometry_wire_actor,
             *self.triad_actors,
         ):
             self.renderer.AddActor(actor)
@@ -501,20 +515,16 @@ class FoamPipeline:
         self.plane_outline_actor.SetVisibility(1 if visible else 0)
 
     def update_geometry(self, visible, mode, opacity, line_width):
-        """Building geometry: feature edges (clean line drawing) or wireframe."""
+        """Building geometry: feature edges (clean line drawing) or wireframe.
+        Just toggles which of the two fixed actors is shown -- no live input /
+        representation swapping (see the note in _build_filters)."""
         show = bool(visible) and self.has_geometry
-        self.geometry_actor.SetVisibility(1 if show else 0)
-        if not show:
-            return
-        prop = self.geometry_actor.GetProperty()
-        if mode == "wireframe":
-            self.geometry_mapper.SetInputConnection(self.geometry_reader.GetOutputPort())
-            prop.SetRepresentationToWireframe()
-        else:  # feature edges (default)
-            self.geometry_mapper.SetInputConnection(self.geometry_features.GetOutputPort())
-            prop.SetRepresentationToSurface()
-        prop.SetOpacity(float(opacity))
-        prop.SetLineWidth(float(line_width))
+        self.geometry_edges_actor.SetVisibility(1 if (show and mode != "wireframe") else 0)
+        self.geometry_wire_actor.SetVisibility(1 if (show and mode == "wireframe") else 0)
+        for actor in (self.geometry_edges_actor, self.geometry_wire_actor):
+            prop = actor.GetProperty()
+            prop.SetOpacity(float(opacity))
+            prop.SetLineWidth(float(line_width))
 
     def update_plane_outline(self, axis, coord):
         """Move the plane frame to world *coord* along *axis* -- four points, no

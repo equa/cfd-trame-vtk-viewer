@@ -109,10 +109,22 @@ def main():
 
     # building geometry (OBJ): the demo case ships a room-box building.obj
     check("case ships building.obj", pipe.has_geometry)
-    pipe.update_geometry(True, "features", 1.0, 2.0)
     pipe.geometry_features.Update()
     check("feature edges extracted", pipe.geometry_features.GetOutput().GetNumberOfCells() > 0,
           f"{pipe.geometry_features.GetOutput().GetNumberOfCells()} edges")
+
+    # mode switching toggles the two fixed actors — never both, and the
+    # wireframe->features round-trip returns to edges-only (the reported bug).
+    def geo_vis():
+        return (pipe.geometry_edges_actor.GetVisibility(), pipe.geometry_wire_actor.GetVisibility())
+    pipe.update_geometry(True, "features", 1.0, 2.0)
+    check("features -> edges actor only", geo_vis() == (1, 0), str(geo_vis()))
+    pipe.update_geometry(True, "wireframe", 1.0, 2.0)
+    check("wireframe -> wire actor only", geo_vis() == (0, 1), str(geo_vis()))
+    pipe.update_geometry(True, "features", 1.0, 2.0)
+    check("wireframe->features round-trip -> edges only", geo_vis() == (1, 0), str(geo_vis()))
+    pipe.update_geometry(False, "features", 1.0, 2.0)
+    check("hidden -> neither actor", geo_vis() == (0, 0), str(geo_vis()))
 
     pipe.update_surface(True, True, 0.3, False, True, False)
     pipe.surface_clip.Update()

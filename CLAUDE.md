@@ -200,8 +200,12 @@ buoyancy-driven room airflow with a thermal plume, steady state.
   `building<N>.obj` (e.g. `building10.obj`) — `set_case` searches
   `building\d*\.obj` and takes the first (bare name first, then by index).
   Shows it as **feature edges** (`vtkFeatureEdges`, a clean architectural line
-  drawing — default) or **wireframe** (`SetRepresentationToWireframe` on the raw
-  surface), with opacity + line-width. `update_geometry` in the pipeline; state
+  drawing — default) or **wireframe** (the raw surface), with opacity +
+  line-width. **Two fixed-input actors toggled by visibility** — NOT one actor
+  whose mapper input/representation is swapped live: swapping corrupted the
+  vtk.js client (after a wireframe round-trip, feature edges came back as filled
+  triangles — the synchronizer kept the stale input). `update_geometry` just
+  flips `geometry_edges_actor`/`geometry_wire_actor` visibility; state
   `geometry_visible/mode/opacity/line_width`; cheap handler. Only `building.obj`
   for now — more `triSurface` files are a later extension.
 - **Red plane outline is now drag-only.** Hidden by default; the position
