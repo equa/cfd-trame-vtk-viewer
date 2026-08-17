@@ -174,6 +174,10 @@ class FoamViz:
                 "legend_title": "",
                 # 0 = smooth colour map; >0 bands it into that many colours.
                 "n_colors": 0,
+                # Scene lighting: ambient floor (no face goes fully black) +
+                # diffuse (directional shading) on the lit actors.
+                "light_ambient": 0.3,
+                "light_diffuse": 0.7,
                 "auto_range": True,
                 # Off by default. It is the right tool when a tiny extreme
                 # region flattens the map, but it saturates everything above the
@@ -316,6 +320,7 @@ class FoamViz:
         p.n_colors = int(s.n_colors or 0)
         p.set_preset(s.preset)
         p.set_color_range(float(s.range_min), float(s.range_max))
+        p.set_lighting(float(s.light_ambient), float(s.light_diffuse))
 
         coord = self._active_coord()
         p.update_plane(s.plane_axis, coord)
@@ -586,6 +591,8 @@ class FoamViz:
         "preset",
         "range_min",
         "range_max",
+        "light_ambient",
+        "light_diffuse",
         "use_cell_data",
         "surface_visible",
         "surface_colored",
@@ -1008,6 +1015,13 @@ class FoamViz:
                 prepend_icon="mdi-arrow-expand-horizontal",
                 click=self.ctrl.rescale,
             )
+            # Scene lighting. A base rig (light kit + ambient floor) does the
+            # heavy lifting; these are for fine-tuning / dev. Ambient lifts faces
+            # angled away from the lights; diffuse is the directional shading.
+            v3.VDivider(classes="my-3")
+            html.Div("Lighting", classes="text-caption text-medium-emphasis mb-1")
+            _slider("light_ambient", "Ambient", 0.0, 1.0, 0.05)
+            _slider("light_diffuse", "Diffuse", 0.0, 1.0, 0.05)
 
     def _tool_cutplane(self, title, icon):
         """Cut plane + slice: the plane is the hub the slice, stream seeds and

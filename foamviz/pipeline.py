@@ -55,6 +55,18 @@ class FoamPipeline:
         self.renderer.SetBackground2(0.17, 0.19, 0.24)
         self.renderer.GradientBackgroundOn()
 
+        # A light kit (key + fill + back + head), not VTK's default single
+        # camera headlight: that leaves faces angled away from the camera almost
+        # black. This is the rig ParaView uses. Two-sided lighting also lifts the
+        # inward-facing walls seen once "cull near walls" is on. (An ambient floor
+        # on the actors, set in _make_actor / set_lighting, guarantees no face
+        # goes fully black regardless of light direction -- and is the part that
+        # survives to the vtk.js client, which does its own lighting.)
+        self.light_kit = vtk.vtkLightKit()
+        self.light_kit.MaintainLuminanceOn()
+        self.light_kit.AddLightsToRenderer(self.renderer)
+        self.renderer.TwoSidedLightingOn()
+
         self.render_window = vtk.vtkRenderWindow()
         self.render_window.SetOffScreenRendering(1)
         self.render_window.AddRenderer(self.renderer)
@@ -222,6 +234,10 @@ class FoamPipeline:
             mapper.InterpolateScalarsBeforeMappingOn()
         actor = vtk.vtkActor()
         actor.SetMapper(mapper)
+        # Ambient floor + diffuse balance (see set_lighting); the defaults keep
+        # faces from going black before the first update_scene.
+        actor.GetProperty().SetAmbient(0.3)
+        actor.GetProperty().SetDiffuse(0.7)
         return actor, mapper
 
     def _build_triad(self):
@@ -380,6 +396,17 @@ class FoamPipeline:
         mapper.SelectColorArray(COLOR_ARRAY)
 
     # -- appearance -------------------------------------------------------
+
+    def set_lighting(self, ambient, diffuse):
+        """Ambient floor + diffuse balance on the lit actors, so faces angled
+        away from the lights never go pure black (ambient) while keeping some
+        directional shading (diffuse). The slice is unlit (flat colour) and the
+        outline/triad keep their own look, so they are left out."""
+        for actor in (self.surface_actor, self.contour_actor,
+                      self.stream_actor, self.glyph_actor):
+            prop = actor.GetProperty()
+            prop.SetAmbient(ambient)
+            prop.SetDiffuse(diffuse)
 
     def set_color_range(self, vmin, vmax):
         self.color_range = (vmin, vmax)

@@ -83,6 +83,15 @@ assertions need updating — the checks are deliberately concrete.
 
 ## VTK-Python traps hit here
 
+- **Default lighting is a single camera headlight** → faces angled away go
+  black (the boundary shell especially). Fixed with a `vtkLightKit` (key + fill
+  + back + head, like ParaView) + `TwoSidedLightingOn` on the renderer, plus an
+  **ambient floor** on the lit actors (`set_lighting`, `light_ambient`/
+  `light_diffuse` knobs in the Colour panel, default 0.3/0.7). The ambient floor
+  is the part that reliably survives to the **vtk.js client** (local mode does
+  its own lighting; server-side lights may not serialise) — it's what guarantees
+  no face is pure black in either mode, and it lights the server-rendered report
+  PNGs. The slice stays `LightingOff` (flat, quantitative) and is left out.
 - **Never pass a freshly constructed source inline.**
   `glyph.SetSourceConnection(vtk.vtkArrowSource().GetOutputPort())` **segfaults**
   — Python collects the temporary while the pipeline still references it. Keep an
