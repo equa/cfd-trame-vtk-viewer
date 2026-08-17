@@ -177,7 +177,12 @@ assertions need updating — the checks are deliberately concrete.
 - `system/controlDict`: `writeFormat ascii` → `binary`
 
 10 × 5 × 10 m room, 1 m² of floor held at 600 K, everything else 300 K.
-Converges at iteration 1730 and writes 19 time directories. Regenerate:
+Converges at iteration 1730 and writes 19 time directories.
+
+`constant/triSurface/building.obj` is a small **added fixture** (a box at the
+room bounds), not part of the tutorial — it exercises the Geometry tool and its
+pipeline test. `Allrun`/`Allclean` leave it alone. A real case ships its own
+`building.obj` here. Regenerate the solution (not the OBJ):
 
 ```bash
 source /opt/cfd/OpenFOAM-13/etc/bashrc
@@ -186,6 +191,22 @@ cd data/hotRoom && ./Allclean && ./Allrun
 
 Chosen as the nearest tutorial analogue to an IDA ICE `HEATING` case:
 buoyancy-driven room airflow with a thermal plume, steady state.
+
+## Geometry tool + outline changes (2026-08-17)
+
+- **Geometry tool** (6th tool): reads `constant/triSurface/building.obj` via
+  `vtkOBJReader` (once per case, in `set_case`; `has_geometry` gates the UI).
+  Shows it as **feature edges** (`vtkFeatureEdges`, a clean architectural line
+  drawing — default) or **wireframe** (`SetRepresentationToWireframe` on the raw
+  surface), with opacity + line-width. `update_geometry` in the pipeline; state
+  `geometry_visible/mode/opacity/line_width`; cheap handler. Only `building.obj`
+  for now — more `triSurface` files are a later extension.
+- **Red plane outline is now drag-only.** Hidden by default; the position
+  slider's `start`/`end` show/hide it (`plane_drag_start` /
+  `plane_slider_release` + `set_plane_outline_visible`); `_on_plane_slide` moves
+  it during the drag. `update_scene` no longer positions it.
+- **The always-on domain outline box (`vtkOutlineFilter`) was removed** — the
+  building geometry is the context now.
 
 ## Architecture in one paragraph
 

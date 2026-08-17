@@ -71,6 +71,7 @@ TOOLS = [
     ("contour", "Isosurfaces", "mdi-blur"),
     ("stream", "Streamlines", "mdi-vector-polyline"),
     ("glyph", "Arrows", "mdi-arrow-top-right"),
+    ("geometry", "Geometry", "mdi-home-outline"),
 ]
 
 # Keyboard shortcuts, extensibly: a pressed key (event.key) -> a CSS selector to
@@ -230,6 +231,12 @@ class FoamViz:
                 # patches
                 "patch_items": [],
                 "selected_patches": [],
+                # building geometry (OBJ). has_geometry is set per case.
+                "has_geometry": False,
+                "geometry_visible": False,
+                "geometry_mode": "features",
+                "geometry_opacity": 1.0,
+                "geometry_line_width": 2.0,
             }
         )
         # Debounced sliders (see _slider(debounce=True)) bind their thumb to a
@@ -283,6 +290,8 @@ class FoamViz:
                 "contour_visible": False,
                 "stream_visible": False,
                 "glyph_visible": False,
+                # does this case ship constant/triSurface/building.obj?
+                "has_geometry": self.pipeline.has_geometry,
             }
         )
 
@@ -369,7 +378,6 @@ class FoamViz:
 
         coord = self._active_coord()
         p.update_plane(s.plane_axis, coord)
-        p.update_plane_outline(s.plane_axis, coord)
         p.update_surface(
             s.surface_visible,
             s.surface_colored,
@@ -392,6 +400,12 @@ class FoamViz:
             int(s.glyph_count),
             float(s.glyph_scale),
             s.glyph_scale_by,
+        )
+        p.update_geometry(
+            s.geometry_visible,
+            s.geometry_mode,
+            float(s.geometry_opacity),
+            float(s.geometry_line_width),
         )
 
         self._update_legend()
@@ -646,6 +660,10 @@ class FoamViz:
         "contour_opacity",
         "stream_radius",
         "glyph_scale",
+        "geometry_visible",
+        "geometry_mode",
+        "geometry_opacity",
+        "geometry_line_width",
     )
     def _on_cheap(self, **_):
         self.update_scene()
@@ -681,10 +699,19 @@ class FoamViz:
         release and an axis switch."""
         self._busy_call(self._do_plane_apply)
 
+    @controller.set("plane_drag_start")
+    def plane_drag_start(self):
+        """Slider grabbed: show the red plane frame at the current position so it
+        previews the drag. Hidden again on release (plane_slider_release)."""
+        self.pipeline.update_plane_outline(self.state.plane_axis, float(self.state.plane_slider))
+        self.pipeline.set_plane_outline_visible(True)
+        self.ctrl.view_update()
+
     @controller.set("plane_slider_release")
     def plane_slider_release(self):
-        """Slider let go: the dragged value becomes the active coordinate (the
-        source of truth), then auto-apply."""
+        """Slider let go: hide the frame, the dragged value becomes the active
+        coordinate (the source of truth), then auto-apply."""
+        self.pipeline.set_plane_outline_visible(False)
         axis = self.state.plane_axis
         setattr(self.state, f"plane_{axis}", round(float(self.state.plane_slider), 4))
         self.plane_apply()
@@ -980,6 +1007,7 @@ class FoamViz:
                 "contour": self._tool_contour,
                 "stream": self._tool_stream,
                 "glyph": self._tool_glyph,
+                "geometry": self._tool_geometry,
             }
             for key, title, icon in TOOLS:
                 with html.Div(v_show=(f"active_tool === '{key}'",)):
@@ -1116,6 +1144,7 @@ class FoamViz:
                 min=("axis_min",),
                 max=("axis_max",),
                 step=("Math.max((axis_max - axis_min) / 500, 0.001)",),
+                start=(self.ctrl.plane_drag_start,),
                 end=(self.ctrl.plane_slider_release,),
                 hide_details=True,
                 density="compact",
@@ -1197,6 +1226,28 @@ class FoamViz:
             _switch("glyph_scale_by", "Length follows magnitude")
             _slider("glyph_count", "Count", 20, 3000, 20, debounce=True)
             _slider("glyph_scale", "Size", 0.1, 5.0, 0.1)
+
+    def _tool_geometry(self, title, icon):
+        """Building geometry from constant/triSurface/building.obj."""
+        with _section(title, icon):
+            html.Div(
+                "No constant/triSurface/building.obj in this case.",
+                v_if="!has_geometry",
+                classes="text-caption text-medium-emphasis mb-2",
+            )
+            _switch("geometry_visible", "Show geometry")
+            with v3.VBtnToggle(
+                v_model=("geometry_mode", "features"),
+                mandatory=True,
+                density="compact",
+                variant="outlined",
+                divided=True,
+                classes="mb-3",
+            ):
+                v3.VBtn("Feature edges", value="features", size="small")
+                v3.VBtn("Wireframe", value="wireframe", size="small")
+            _slider("geometry_opacity", "Opacity", 0.0, 1.0, 0.05)
+            _slider("geometry_line_width", "Line width", 0.5, 6.0, 0.5)
 
     # -- main content -----------------------------------------------------
 

@@ -107,6 +107,13 @@ def main():
     check("plane outline is planar", len(zs) == 1, str(zs))
     check("plane outline sits at the cut height", abs(next(iter(zs)) - zmid) < 1e-6)
 
+    # building geometry (OBJ): the demo case ships a room-box building.obj
+    check("case ships building.obj", pipe.has_geometry)
+    pipe.update_geometry(True, "features", 1.0, 2.0)
+    pipe.geometry_features.Update()
+    check("feature edges extracted", pipe.geometry_features.GetOutput().GetNumberOfCells() > 0,
+          f"{pipe.geometry_features.GetOutput().GetNumberOfCells()} edges")
+
     pipe.update_surface(True, True, 0.3, False, True, False)
     pipe.surface_clip.Update()
     clipped = pipe.surface_clip.GetOutput().GetNumberOfCells()

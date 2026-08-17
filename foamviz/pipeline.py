@@ -146,6 +146,9 @@ class FoamPipeline:
         # ResetCamera -- and out of the way before it is first positioned, when
         # its four points still sit at the origin.
         self.plane_outline_actor.SetUseBounds(False)
+        # Shown only while the position slider is being dragged (see
+        # set_plane_outline_visible); hidden the rest of the time.
+        self.plane_outline_actor.SetVisibility(0)
 
         # --- isosurface ---------------------------------------------------
         self.contour = vtk.vtkContourFilter()
@@ -202,13 +205,25 @@ class FoamPipeline:
         self.glyph_actor, self.glyph_mapper = self._make_actor()
         self.glyph_mapper.SetInputConnection(self.glyph.GetOutputPort())
 
-        # --- static context: domain outline and an RGB orientation triad ---
-        self.outline = vtk.vtkOutlineFilter()
-        self.outline_actor, self.outline_mapper = self._make_actor(scalar_visibility=False)
-        self.outline_mapper.SetInputConnection(self.outline.GetOutputPort())
-        self.outline_actor.GetProperty().SetColor(0.55, 0.58, 0.64)
-        self.outline_actor.GetProperty().SetLineWidth(1.5)
+        # --- building geometry (OBJ from constant/triSurface) --------------
+        # Static context geometry, read once per case (set_geometry_file). Shown
+        # as feature edges (a clean architectural line drawing) or as wireframe.
+        self.has_geometry = False
+        self.geometry_reader = vtk.vtkOBJReader()
+        self.geometry_features = vtk.vtkFeatureEdges()
+        self.geometry_features.SetInputConnection(self.geometry_reader.GetOutputPort())
+        self.geometry_features.BoundaryEdgesOn()
+        self.geometry_features.FeatureEdgesOn()
+        self.geometry_features.SetFeatureAngle(30)
+        self.geometry_features.ManifoldEdgesOff()
+        self.geometry_features.NonManifoldEdgesOff()
+        self.geometry_actor, self.geometry_mapper = self._make_actor(scalar_visibility=False)
+        gprop = self.geometry_actor.GetProperty()
+        gprop.SetColor(0.85, 0.87, 0.92)
+        gprop.LightingOff()
+        self.geometry_actor.SetVisibility(0)
 
+        # --- orientation triad ---------------------------------------------
         self.triad_actors = self._build_triad()
 
         for actor in (
@@ -218,7 +233,7 @@ class FoamPipeline:
             self.contour_actor,
             self.stream_actor,
             self.glyph_actor,
-            self.outline_actor,
+            self.geometry_actor,
             *self.triad_actors,
         ):
             self.renderer.AddActor(actor)
@@ -316,6 +331,11 @@ class FoamPipeline:
 
     def set_case(self, case):
         self.case = case
+        # Building geometry, if the case ships one. Read once per case (static).
+        obj = case.case_dir / "constant" / "triSurface" / "building.obj"
+        self.has_geometry = obj.is_file()
+        if self.has_geometry:
+            self.geometry_reader.SetFileName(str(obj))
         self.vector_field = "U" if "U" in case.vector_fields else (
             case.vector_fields[0] if case.vector_fields else None
         )
@@ -355,7 +375,6 @@ class FoamPipeline:
         self.crinkle.SetInputData(case.internal)
         self.contour.SetInputData(case.internal)
         self.tracer.SetInputData(case.internal)
-        self.outline.SetInputData(case.internal)
         self._place_triad()
 
     def apply_color_array(self):
@@ -463,6 +482,26 @@ class FoamPipeline:
         for plane in (self.cutter.GetCutFunction(), self.surface_clip.GetClipFunction()):
             plane.SetOrigin(*origin)
             plane.SetNormal(*normal)
+
+    def set_plane_outline_visible(self, visible):
+        """Show the red plane frame only while the position slider is dragged."""
+        self.plane_outline_actor.SetVisibility(1 if visible else 0)
+
+    def update_geometry(self, visible, mode, opacity, line_width):
+        """Building geometry: feature edges (clean line drawing) or wireframe."""
+        show = bool(visible) and self.has_geometry
+        self.geometry_actor.SetVisibility(1 if show else 0)
+        if not show:
+            return
+        prop = self.geometry_actor.GetProperty()
+        if mode == "wireframe":
+            self.geometry_mapper.SetInputConnection(self.geometry_reader.GetOutputPort())
+            prop.SetRepresentationToWireframe()
+        else:  # feature edges (default)
+            self.geometry_mapper.SetInputConnection(self.geometry_features.GetOutputPort())
+            prop.SetRepresentationToSurface()
+        prop.SetOpacity(float(opacity))
+        prop.SetLineWidth(float(line_width))
 
     def update_plane_outline(self, axis, coord):
         """Move the plane frame to world *coord* along *axis* -- four points, no
