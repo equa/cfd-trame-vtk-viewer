@@ -105,6 +105,20 @@ assertions need updating — the checks are deliberately concrete.
 
 ## Trame traps hit here
 
+- **In local (vtk.js) mode the client owns its camera.** A camera set
+  server-side (`renderer` camera + `ResetCamera`) is invisible until pushed:
+  `view.push_camera()` (wired as `ctrl.view_push_camera`). `view.reset_camera()`
+  only *refits* the client's own orientation, so calling it after a preset
+  clobbered the orientation — which is why the X/Y/Z/Iso view buttons "never
+  worked". `set_view` and the initial `reset_camera=True` load now push instead.
+- **Keyboard shortcuts are extensible via `KEY_SHORTCUTS`** (`app.py`): a pressed
+  `event.key` → a CSS selector, and one injected `window` keydown listener
+  (`client.Script`, `_KEY_JS_TEMPLATE`) clicks the matched element. So a shortcut
+  rides an existing button's own click handler — no JS↔Python bridge. To add one:
+  give the target element a `js-*` class and add a row. Shift makes an uppercase
+  key (shift+x → `-x`). vtk.js already binds `r` to reset the camera.
+  (`client.Script` renders as `<trame-script :script="trame__inline_script_N">`;
+  the JS lives in that state var and runs client-side, like `client.Style`.)
 - **`VBtnToggle(...).add_children([VBtn(...), ...])` renders the buttons twice.**
   A widget constructed while another element is the active parent attaches
   there too. Build children inside `with toggle:`.

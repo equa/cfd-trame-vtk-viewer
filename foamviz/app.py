@@ -72,6 +72,36 @@ TOOLS = [
     ("glyph", "Arrows", "mdi-arrow-top-right"),
 ]
 
+# Keyboard shortcuts, extensibly: a pressed key (event.key) -> a CSS selector to
+# click. Reusable for any button-backed action -- add a row here and give the
+# target element that class; the shortcut then rides the element's own click
+# handler, so there's no separate JS<->Python wiring. Shift yields an uppercase
+# key (so shift+x -> -x). (vtk.js already binds "r" to reset the camera.)
+KEY_SHORTCUTS = {
+    "x": ".js-view-px", "X": ".js-view-mx",
+    "y": ".js-view-py", "Y": ".js-view-my",
+    "z": ".js-view-pz", "Z": ".js-view-mz",
+}
+
+# One window-level keydown listener that dispatches KEY_SHORTCUTS by clicking the
+# mapped element. Ignores typing in fields and OS/browser modifier combos.
+_KEY_JS_TEMPLATE = """
+(function () {
+  if (window.__foamvizKeys) return;
+  window.__foamvizKeys = true;
+  const MAP = __MAP__;
+  window.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const sel = MAP[e.key];
+    if (!sel) return;
+    const el = document.querySelector(sel);
+    if (el) { el.click(); e.preventDefault(); }
+  });
+})();
+"""
+
 
 @TrameApp()
 class FoamViz:
@@ -318,7 +348,7 @@ class FoamViz:
 
         if reset_camera:
             p.set_view("iso")
-            self.ctrl.view_reset_camera()
+            self.ctrl.view_push_camera()  # apply the default orientation on the client
         self.ctrl.view_update()
 
     def _sync_drafts(self):
@@ -688,7 +718,7 @@ class FoamViz:
     @controller.set("set_view")
     def set_view(self, direction):
         self.pipeline.set_view(direction)
-        self.ctrl.view_reset_camera()
+        self.ctrl.view_push_camera()  # push orientation to the client (local mode)
         self.ctrl.view_update()
 
     @controller.set("toggle_play")
@@ -802,6 +832,7 @@ class FoamViz:
             self.ui = layout
             layout.title.set_text("FoamViz")
             client.Style(_CSS)
+            client.Script(_KEY_JS_TEMPLATE.replace("__MAP__", json.dumps(KEY_SHORTCUTS)))
 
             with layout.icon:
                 v3.VIcon("mdi-air-filter")
@@ -1108,6 +1139,11 @@ class FoamViz:
                 )
                 self.ctrl.view_update = view.update
                 self.ctrl.view_reset_camera = view.reset_camera
+                # Push the server camera to the client: in local (vtk.js) mode the
+                # client owns its camera, so a preset orientation set server-side
+                # is invisible until pushed (this is why the view buttons never
+                # worked -- reset_camera only refit the client's own orientation).
+                self.ctrl.view_push_camera = view.push_camera
                 # Keep the server camera in step with the client's orbit, so a
                 # report figure (exported server-side) frames what the user set up.
                 view.push_remote_camera_on_end_interaction()
@@ -1123,11 +1159,14 @@ class FoamViz:
         keeps them one glance from the result they change."""
         with html.Div(classes="foamviz-bottombar"):
             for label, direction in VIEW_BUTTONS:
+                # Stable class (js-view-px, js-view-mx, ...) so a keyboard
+                # shortcut can trigger the button (see KEY_SHORTCUTS / _KEY_JS).
+                token = direction.replace("+", "p").replace("-", "m")
                 v3.VBtn(
                     label,
                     size="small",
                     variant="tonal",
-                    classes="mx-0 px-2",
+                    classes=f"mx-0 px-2 js-view-{token}",
                     min_width="0",
                     click=(self.ctrl.set_view, f"['{direction}']"),
                 )
