@@ -38,6 +38,12 @@ log = logging.getLogger("foamviz")
 
 SHOT_ROUTE = "/foamviz/screenshot.png"
 
+# Interactive vtk.js scene export is mothballed for now: the report uses the PNG
+# poster only, and unused <case>/report/*.vtkjs files would just accumulate. The
+# export code is kept intact -- flip this to True to write the scenes again once
+# an interactive report viewer is built.
+EXPORT_VTKJS = False
+
 COMPONENTS = [
     {"title": "Magnitude", "value": "magnitude"},
     {"title": "X", "value": "x"},
@@ -616,15 +622,18 @@ class FoamViz:
         self.pipeline.screenshot(str(report_dir / f"{stem}.png"))
 
         # .vtkjs -- the exporter writes a directory; zip it into one file.
-        tmp = Path(tempfile.mkdtemp(prefix="foamviz_scene_"))
-        try:
-            self.pipeline.write_vtkjs(tmp)
-            with zipfile.ZipFile(report_dir / f"{stem}.vtkjs", "w", zipfile.ZIP_DEFLATED) as z:
-                for f in tmp.rglob("*"):
-                    if f.is_file():
-                        z.write(f, f.relative_to(tmp))
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+        # Disabled for now (see EXPORT_VTKJS); kept so an interactive report
+        # viewer can re-enable it with a one-line flip.
+        if EXPORT_VTKJS:
+            tmp = Path(tempfile.mkdtemp(prefix="foamviz_scene_"))
+            try:
+                self.pipeline.write_vtkjs(tmp)
+                with zipfile.ZipFile(report_dir / f"{stem}.vtkjs", "w", zipfile.ZIP_DEFLATED) as z:
+                    for f in tmp.rglob("*"):
+                        if f.is_file():
+                            z.write(f, f.relative_to(tmp))
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
 
         meta = {
             "index": int(stem.split("_")[1]),
