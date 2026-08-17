@@ -556,7 +556,6 @@ class FoamViz:
         "preset",
         "range_min",
         "range_max",
-        "n_colors",
         "use_cell_data",
         "surface_visible",
         "surface_colored",
@@ -569,6 +568,16 @@ class FoamViz:
         "glyph_scale",
     )
     def _on_cheap(self, **_):
+        self.update_scene()
+
+    @change("n_colors")
+    def _on_n_colors(self, n_colors, **_):
+        # Clamp the colour-band count to [0, 256] — the number field lets you
+        # type out of range (negative, huge). Snap it back, then render.
+        clamped = max(0, min(256, int(n_colors or 0)))
+        if clamped != n_colors:
+            self.state.n_colors = clamped  # re-fires this handler with the clamped value
+            return
         self.update_scene()
 
     # ------------------------------------------------------------ controller
@@ -955,7 +964,7 @@ class FoamViz:
                 label="Bands (0 = smooth)",
                 type="number",
                 min=0,
-                max=32,
+                max=256,
                 classes="mt-3 js-bands",
                 **_FIELD,
             )
@@ -1352,7 +1361,7 @@ _CSS = """
   background: rgba(16,18,24,.72); border: 1px solid rgba(255,255,255,.10);
   border-radius: 10px; padding: 6px 10px; backdrop-filter: blur(6px);
 }
-.foamviz-section { margin: 2px 0; }
+.foamviz-section { margin: 10px 6px; }
 .foamviz-section-head {
   display: flex; align-items: center; padding: 10px 4px 6px;
   font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #c8ccd6;

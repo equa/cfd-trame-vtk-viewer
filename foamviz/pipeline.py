@@ -528,18 +528,22 @@ class FoamPipeline:
         self.renderer.ResetCamera()
 
     def set_view(self, direction):
-        """Look along a named axis: ``+x``, ``-x``, ``+y`` ... or ``iso``."""
+        """Look along a named axis: ``+x``, ``-x``, ``+y`` ... or ``iso``.
+
+        Z is up: these are building rooms, laid out with x/y in the ground plane
+        and z vertical. So every view has +z up, except the top/bottom (z-axis)
+        views, where the up vector can't be z and falls back to +y."""
         camera = self.renderer.GetActiveCamera()
         if direction == "iso":
             camera.SetPosition(1, 1, 1)
-            camera.SetViewUp(0, 1, 0)
+            camera.SetViewUp(0, 0, 1)
         else:
             sign = -1.0 if direction.startswith("-") else 1.0
             axis = direction[-1]
             vec = [0.0, 0.0, 0.0]
             vec["xyz".index(axis)] = sign
             camera.SetPosition(*vec)
-            camera.SetViewUp((0, 1, 0) if axis != "y" else (0, 0, 1))
+            camera.SetViewUp((0, 0, 1) if axis != "z" else (0, 1, 0))
         camera.SetFocalPoint(0, 0, 0)
         self.renderer.ResetCamera()
 
