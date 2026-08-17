@@ -745,7 +745,7 @@ class FoamViz:
         async def handler(_request):
             with tempfile.TemporaryDirectory() as tmp:
                 png = Path(tmp) / "shot.png"
-                self.pipeline.screenshot(png, magnification=2)
+                self.pipeline.screenshot(png)
                 body = png.read_bytes()
             name = f"foamviz-{self.state.case_name}-t{self.state.time_label}.png"
             name = name.replace(" ", "").replace("/", "-")
@@ -817,8 +817,13 @@ class FoamViz:
 
             # A download link, not a button with a callback: the route renders
             # on demand, so the click and the image cannot get out of step.
+            # RELATIVE href (no leading slash): behind nginx the viewer is served
+            # under /viz/, so an absolute /foamviz/... would hit the origin root
+            # (the SPA) instead of this service. Relative resolves to
+            # /viz/foamviz/... which nginx strips back to the registered route;
+            # standalone (page at /) it resolves to /foamviz/... — works both.
             with html.A(
-                href=SHOT_ROUTE,
+                href=SHOT_ROUTE.lstrip("/"),
                 download=True,
                 classes="js-screenshot",
                 style="text-decoration: none",

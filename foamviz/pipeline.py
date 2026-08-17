@@ -548,8 +548,14 @@ class FoamPipeline:
         exporter.SetFileName(str(directory))
         exporter.Write()
 
-    def screenshot(self, path, magnification=2):
-        """Write a PNG of the current view at *magnification* times the size."""
+    def screenshot(self, path, magnification=1):
+        """Write a PNG of the current view.
+
+        ``magnification`` stays 1: ``vtkWindowToImageFilter`` scales up by *tiled*
+        rendering, and offscreen OSMesa does not shift the camera per tile, so a
+        scale of 2 yields the same frame repeated in a 2x2 grid rather than a
+        higher-resolution image. At scale 1 the capture is the window's own size
+        (which, with a live client, is the client's viewport)."""
         # Ensure a current frame in the buffer: without a live client driving it
         # (report export) the window may be unrendered, or left perturbed by the
         # scene exporter -- either segfaults vtkWindowToImageFilter otherwise.
