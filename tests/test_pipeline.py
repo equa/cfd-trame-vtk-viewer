@@ -108,30 +108,31 @@ def main():
     check("plane outline sits at the cut height", abs(next(iter(zs)) - zmid) < 1e-6)
 
     # building geometry (OBJ): the demo case ships a room-box building.obj.
-    # Only the shown geometry actor is in the scene (add/remove, so the client
-    # never gets geometry it isn't showing); off = nothing, and the OBJ is not
-    # even read until geometry is shown. Laziness checks come first, before any
-    # Update() would read the file.
+    # One fixed actor; the mode toggles manifold edges on a single
+    # vtkFeatureEdges (feature edges vs every edge) -- a filter-parameter change,
+    # not scene/mapper mutation. OBJ is read lazily.
     check("case ships building.obj", pipe.has_geometry)
-
-    def geo_scene():
-        return (bool(pipe.renderer.HasViewProp(pipe.geometry_edges_actor)),
-                bool(pipe.renderer.HasViewProp(pipe.geometry_wire_actor)))
     check("geometry off -> OBJ not read yet",
           pipe.geometry_reader.GetOutput().GetNumberOfPoints() == 0)
-    check("geometry off -> neither actor in scene", geo_scene() == (False, False), str(geo_scene()))
 
     pipe.update_geometry(True, "features", 1.0, 2.0)
-    check("features -> only edges actor in scene", geo_scene() == (True, False), str(geo_scene()))
-    pipe.geometry_features.Update()
-    check("feature edges extracted", pipe.geometry_features.GetOutput().GetNumberOfCells() > 0,
-          f"{pipe.geometry_features.GetOutput().GetNumberOfCells()} edges")
+    pipe.geometry_edges.Update()
+    n_features = pipe.geometry_edges.GetOutput().GetNumberOfCells()
+    check("feature edges extracted", n_features > 0, f"{n_features} edges")
+    check("geometry actor shown", pipe.geometry_actor.GetVisibility() == 1)
+
     pipe.update_geometry(True, "wireframe", 1.0, 2.0)
-    check("wireframe -> only wire actor in scene", geo_scene() == (False, True), str(geo_scene()))
+    pipe.geometry_edges.Update()
+    n_all = pipe.geometry_edges.GetOutput().GetNumberOfCells()
+    check("wireframe adds interior edges", n_all > n_features, f"{n_all} vs {n_features}")
+
     pipe.update_geometry(True, "features", 1.0, 2.0)
-    check("wireframe->features round-trip -> only edges", geo_scene() == (True, False), str(geo_scene()))
+    pipe.geometry_edges.Update()
+    check("round-trip restores feature edges", pipe.geometry_edges.GetOutput().GetNumberOfCells() == n_features,
+          f"{pipe.geometry_edges.GetOutput().GetNumberOfCells()} vs {n_features}")
+
     pipe.update_geometry(False, "features", 1.0, 2.0)
-    check("hidden -> neither actor in scene", geo_scene() == (False, False), str(geo_scene()))
+    check("geometry off -> actor hidden", pipe.geometry_actor.GetVisibility() == 0)
 
     pipe.update_surface(True, True, 0.3, False, True, False)
     pipe.surface_clip.Update()

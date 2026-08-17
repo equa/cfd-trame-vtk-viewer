@@ -195,23 +195,25 @@ buoyancy-driven room airflow with a thermal plume, steady state.
 ## Geometry tool + outline changes (2026-08-17)
 
 - **Geometry tool** (6th tool): reads a building OBJ from `constant/triSurface/`
-  via `vtkOBJReader` (once per case, in `set_case`; `has_geometry` gates the UI).
-  setupIceCase indexes geometry, so the file is `building.obj` **or**
-  `building<N>.obj` (e.g. `building10.obj`) — `set_case` searches
-  `building\d*\.obj` and takes the first (bare name first, then by index).
-  Shows it as **feature edges** (`vtkFeatureEdges`, a clean architectural line
-  drawing — default) or **wireframe** (the raw surface), with opacity +
-  line-width. **Two fixed-input actors** (`geometry_edges_actor` /
-  `geometry_wire_actor`), and `update_geometry` **adds only the one being shown
-  to the renderer** (add/remove, not hide-in-place):
-  - *Not* one actor whose mapper input/representation is swapped live — that
-    corrupted the vtk.js client (after a wireframe round-trip, feature edges came
-    back as filled triangles: the synchronizer kept the stale input).
-  - *Not* both-in-scene-and-hidden either — local mode serialises every actor in
-    the scene regardless of visibility, so the wireframe surface (a potentially
-    huge triangle mesh) would be shipped to the browser even in feature-edges
-    mode, and the OBJ read server-side even with geometry off. Add/remove means:
-    off → nothing read or shipped; features → edges only; wireframe → the surface.
+  via `vtkOBJReader` (lazily; `set_case` only sets the filename, `has_geometry`
+  gates the UI). setupIceCase indexes geometry, so the file is `building.obj`
+  **or** `building<N>.obj` (e.g. `building10.obj`) — `set_case` searches
+  `building\d*\.obj`, first match (bare name first, then by index).
+  - **ONE fixed actor/mapper fed by a single `vtkFeatureEdges`**, rendered as
+    flat lines throughout. The mode is a **filter-parameter toggle**, not a
+    scene/mapper mutation — so the output re-serialises to the vtk.js client
+    cleanly, exactly like changing the contour count. This is the pattern that
+    works; the ones that DIDN'T (each corrupted the client, learned the hard
+    way): swapping the mapper's input (stale input → filled triangles), changing
+    the actor's representation, and actor add/remove (re-added actors lost their
+    properties → FE came back shaded, WF as surfaces).
+  - **Feature edges** = FeatureEdges on, Manifold off (sharp + boundary — the
+    architectural outline). **Wireframe** = FeatureEdges *off*, Manifold on
+    (every edge). They are OPPOSITE toggles because `vtkFeatureEdges` quirk:
+    feature+manifold *together* yields only the feature edges, but manifold
+    *alone* yields all interior edges. Boundary stays on for both.
+  - Footprint: only the current mode's edges exist — feature edges are small; the
+    full all-edges set is built only when wireframe is actually chosen.
   State `geometry_visible/mode/opacity/line_width`; cheap handler. Only
   `building.obj` (or `building<N>.obj`) for now — more `triSurface` files later.
 - **Red plane outline is now drag-only.** Hidden by default; the position

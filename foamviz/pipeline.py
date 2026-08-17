@@ -208,41 +208,33 @@ class FoamPipeline:
         self.glyph_mapper.SetInputConnection(self.glyph.GetOutputPort())
 
         # --- building geometry (OBJ from constant/triSurface) --------------
-        # Static context geometry, read once per case (set_case). Feature edges
-        # (a clean architectural line drawing) or wireframe.
+        # ONE fixed actor/mapper fed by a single vtkFeatureEdges. Both modes are
+        # flat lines; the mode only toggles *manifold edges* on that filter --
+        # feature edges (sharp + boundary) vs wireframe (every edge). That is a
+        # filter-parameter change, so the output re-serialises to the vtk.js
+        # client cleanly, exactly like changing the contour count.
         #
-        # TWO fixed-input actors toggled by visibility, NOT one actor whose mapper
-        # input + representation we swap live: swapping them corrupts the vtk.js
-        # client (after a wireframe round-trip, feature edges came back as a
-        # jumble of filled triangles -- the synchronizer kept the stale input).
+        # Deliberately NOT: swapping the mapper's input, changing the actor's
+        # representation, or add/remove of actors at runtime -- each corrupted the
+        # client (stale input showed filled triangles; re-added actors lost their
+        # properties, so FE came back shaded and WF came back as surfaces). Only
+        # the current mode's edges ever exist, so the big all-edges set is only
+        # built when wireframe is actually chosen.
         self.has_geometry = False
         self.geometry_reader = vtk.vtkOBJReader()
-        self.geometry_features = vtk.vtkFeatureEdges()
-        self.geometry_features.SetInputConnection(self.geometry_reader.GetOutputPort())
-        self.geometry_features.BoundaryEdgesOn()
-        self.geometry_features.FeatureEdgesOn()
-        self.geometry_features.SetFeatureAngle(30)
-        self.geometry_features.ManifoldEdgesOff()
-        self.geometry_features.NonManifoldEdgesOff()
-
-        self.geometry_edges_actor, self.geometry_edges_mapper = self._make_actor(
-            scalar_visibility=False)
-        self.geometry_edges_mapper.SetInputConnection(self.geometry_features.GetOutputPort())
-        self.geometry_wire_actor, self.geometry_wire_mapper = self._make_actor(
-            scalar_visibility=False)
-        self.geometry_wire_mapper.SetInputConnection(self.geometry_reader.GetOutputPort())
-        self.geometry_wire_actor.GetProperty().SetRepresentationToWireframe()
-        for actor in (self.geometry_edges_actor, self.geometry_wire_actor):
-            prop = actor.GetProperty()
-            prop.SetColor(0.85, 0.87, 0.92)
-            prop.LightingOff()
-            actor.SetVisibility(0)
-        # Neither geometry actor is added to the renderer up front: update_geometry
-        # adds only the one being shown. In local mode the client serialises every
-        # actor in the scene (hidden or not), so an unused wireframe surface -- which
-        # can be a very large triangle mesh -- would otherwise be shipped to the
-        # browser and the OBJ read server-side even with geometry off.
-        self._geometry_actor_in_scene = None
+        self.geometry_edges = vtk.vtkFeatureEdges()
+        self.geometry_edges.SetInputConnection(self.geometry_reader.GetOutputPort())
+        self.geometry_edges.BoundaryEdgesOn()
+        self.geometry_edges.FeatureEdgesOn()
+        self.geometry_edges.SetFeatureAngle(30)
+        self.geometry_edges.ManifoldEdgesOff()      # feature-edges mode by default
+        self.geometry_edges.NonManifoldEdgesOff()
+        self.geometry_actor, self.geometry_mapper = self._make_actor(scalar_visibility=False)
+        self.geometry_mapper.SetInputConnection(self.geometry_edges.GetOutputPort())
+        gprop = self.geometry_actor.GetProperty()
+        gprop.SetColor(0.85, 0.87, 0.92)
+        gprop.LightingOff()
+        self.geometry_actor.SetVisibility(0)
 
         # --- orientation triad ---------------------------------------------
         self.triad_actors = self._build_triad()
@@ -254,6 +246,7 @@ class FoamPipeline:
             self.contour_actor,
             self.stream_actor,
             self.glyph_actor,
+            self.geometry_actor,
             *self.triad_actors,
         ):
             self.renderer.AddActor(actor)
@@ -519,29 +512,24 @@ class FoamPipeline:
         self.plane_outline_actor.SetVisibility(1 if visible else 0)
 
     def update_geometry(self, visible, mode, opacity, line_width):
-        """Building geometry: feature edges (clean line drawing) or wireframe.
-
-        Adds only the actor being shown to the renderer (add/remove, not
-        hide-in-place) so the client never receives the geometry it isn't
-        showing -- and nothing at all when geometry is off. No live mapper input
-        / representation swapping either (that corrupted the client; see
-        _build_filters)."""
-        want = None
-        if bool(visible) and self.has_geometry:
-            want = self.geometry_wire_actor if mode == "wireframe" else self.geometry_edges_actor
-
-        if self._geometry_actor_in_scene is not want:
-            if self._geometry_actor_in_scene is not None:
-                self.renderer.RemoveActor(self._geometry_actor_in_scene)
-            if want is not None:
-                self.renderer.AddActor(want)
-            self._geometry_actor_in_scene = want
-
-        for actor in (self.geometry_edges_actor, self.geometry_wire_actor):
-            actor.SetVisibility(1 if actor is want else 0)
-            prop = actor.GetProperty()
-            prop.SetOpacity(float(opacity))
-            prop.SetLineWidth(float(line_width))
+        """Building geometry as flat lines: feature edges (sharp + boundary) or
+        wireframe (every edge). The mode toggles manifold edges on the single
+        vtkFeatureEdges filter -- a parameter change, so the output re-serialises
+        cleanly (like contour count). No input swap, representation change, or
+        actor add/remove, all of which corrupted the vtk.js client."""
+        self.geometry_actor.SetVisibility(1 if (bool(visible) and self.has_geometry) else 0)
+        # Opposite toggles, per vtkFeatureEdges: feature+manifold *together* only
+        # yields the feature edges, but manifold *alone* yields every interior
+        # edge. So: features = feature edges only; wireframe = manifold (all
+        # edges). Boundary edges stay on for both (open meshes). NonManifold in
+        # wireframe catches any stray >2-poly edges.
+        all_edges = mode == "wireframe"
+        self.geometry_edges.SetFeatureEdges(0 if all_edges else 1)
+        self.geometry_edges.SetManifoldEdges(1 if all_edges else 0)
+        self.geometry_edges.SetNonManifoldEdges(1 if all_edges else 0)
+        prop = self.geometry_actor.GetProperty()
+        prop.SetOpacity(float(opacity))
+        prop.SetLineWidth(float(line_width))
 
     def update_plane_outline(self, axis, coord):
         """Move the plane frame to world *coord* along *axis* -- four points, no
