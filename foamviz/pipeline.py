@@ -397,6 +397,13 @@ class FoamPipeline:
 
     # -- appearance -------------------------------------------------------
 
+    def set_light_kit(self, enabled):
+        """Toggle the light kit. Off falls back to VTK's default single camera
+        headlight (auto-created when the renderer has no lights of its own)."""
+        self.renderer.RemoveAllLights()
+        if enabled:
+            self.light_kit.AddLightsToRenderer(self.renderer)
+
     def set_lighting(self, ambient, diffuse):
         """Ambient floor + diffuse balance on the lit actors, so faces angled
         away from the lights never go pure black (ambient) while keeping some

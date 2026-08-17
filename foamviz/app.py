@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import shutil
 import tempfile
 import zipfile
@@ -174,8 +175,10 @@ class FoamViz:
                 "legend_title": "",
                 # 0 = smooth colour map; >0 bands it into that many colours.
                 "n_colors": 0,
-                # Scene lighting: ambient floor (no face goes fully black) +
-                # diffuse (directional shading) on the lit actors.
+                # Scene lighting: the light kit (multi-light rig) on/off, plus an
+                # ambient floor (no face goes fully black) and diffuse
+                # (directional shading) on the lit actors. Persisted globally.
+                "light_kit": True,
                 "light_ambient": 0.3,
                 "light_diffuse": 0.7,
                 "auto_range": True,
@@ -233,6 +236,17 @@ class FoamViz:
         # `<name>_draft` mirror during the drag and only commit the real var on
         # release, so their heavy change handler runs once, not every tick.
         self.state.update({f"{n}_draft": getattr(self.state, n) for n in _DEBOUNCED})
+
+        # Restore globally-persisted preferences (lighting) over the defaults.
+        saved = self._load_settings()
+        for key, lo, hi in (("light_ambient", 0.0, 1.0), ("light_diffuse", 0.0, 1.0)):
+            if key in saved:
+                try:
+                    setattr(self.state, key, min(hi, max(lo, float(saved[key]))))
+                except (TypeError, ValueError):
+                    pass
+        if "light_kit" in saved:
+            setattr(self.state, "light_kit", bool(saved["light_kit"]))
 
     # ------------------------------------------------------------- case load
 
@@ -300,6 +314,37 @@ class FoamViz:
         self.state.field_items = sorted(self.case.fields)
         self.state.vector_items = self.case.vector_fields
 
+    # ---------------------------------------------------- persisted settings
+
+    def _settings_path(self):
+        """Where global preferences live. Default: a dotfile at the data root
+        (persistent in the deployment — the CFD_HOME volume); override with
+        ``FOAMVIZ_SETTINGS``."""
+        env = os.environ.get("FOAMVIZ_SETTINGS")
+        if env:
+            return Path(env)
+        root = Path(self.case_root) if self.case_root else Path.home()
+        return root / ".foamviz-settings.json"
+
+    def _load_settings(self):
+        try:
+            return json.loads(self._settings_path().read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _save_settings(self):
+        data = {k: getattr(self.state, k) for k in ("light_kit", "light_ambient", "light_diffuse")}
+        try:
+            path = self._settings_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, indent=2))
+        except OSError as exc:
+            log.warning("could not persist settings to %s: %s", self._settings_path(), exc)
+
+    def _apply_lighting(self):
+        self.pipeline.set_light_kit(bool(self.state.light_kit))
+        self.pipeline.set_lighting(float(self.state.light_ambient), float(self.state.light_diffuse))
+
     # --------------------------------------------------------------- scene
 
     def update_scene(self, reset_camera=False):
@@ -320,7 +365,7 @@ class FoamViz:
         p.n_colors = int(s.n_colors or 0)
         p.set_preset(s.preset)
         p.set_color_range(float(s.range_min), float(s.range_max))
-        p.set_lighting(float(s.light_ambient), float(s.light_diffuse))
+        self._apply_lighting()
 
         coord = self._active_coord()
         p.update_plane(s.plane_axis, coord)
@@ -591,8 +636,6 @@ class FoamViz:
         "preset",
         "range_min",
         "range_max",
-        "light_ambient",
-        "light_diffuse",
         "use_cell_data",
         "surface_visible",
         "surface_colored",
@@ -616,6 +659,14 @@ class FoamViz:
             self.state.n_colors = clamped  # re-fires this handler with the clamped value
             return
         self.update_scene()
+
+    @change("light_kit", "light_ambient", "light_diffuse")
+    def _on_lighting(self, **_):
+        # Apply directly (works even before a case is loaded — lighting is global
+        # and the pipeline always exists) and persist the preference.
+        self._apply_lighting()
+        self.ctrl.view_update()
+        self._save_settings()
 
     # ------------------------------------------------------------ controller
 
@@ -1015,13 +1066,20 @@ class FoamViz:
                 prepend_icon="mdi-arrow-expand-horizontal",
                 click=self.ctrl.rescale,
             )
-            # Scene lighting. A base rig (light kit + ambient floor) does the
-            # heavy lifting; these are for fine-tuning / dev. Ambient lifts faces
-            # angled away from the lights; diffuse is the directional shading.
-            v3.VDivider(classes="my-3")
-            html.Div("Lighting", classes="text-caption text-medium-emphasis mb-1")
-            _slider("light_ambient", "Ambient", 0.0, 1.0, 0.05)
-            _slider("light_diffuse", "Diffuse", 0.0, 1.0, 0.05)
+            # Scene lighting, in a collapsible panel (hidden by default — mostly
+            # fine-tuning / dev). The base rig does the heavy lifting: the light
+            # kit (toggle), an ambient floor that lifts faces angled away from
+            # the lights, and diffuse for directional shading. Settings persist
+            # globally (see _save_settings).
+            with v3.VExpansionPanels(variant="accordion", flat=True, classes="mt-3"):
+                with v3.VExpansionPanel():
+                    with v3.VExpansionPanelTitle(classes="text-caption pa-2"):
+                        v3.VIcon("mdi-lightbulb-on-outline", size="small", classes="mr-2")
+                        html.Span("Lighting")
+                    with v3.VExpansionPanelText():
+                        _switch("light_kit", "Light kit")
+                        _slider("light_ambient", "Ambient", 0.0, 1.0, 0.05)
+                        _slider("light_diffuse", "Diffuse", 0.0, 1.0, 0.05)
 
     def _tool_cutplane(self, title, icon):
         """Cut plane + slice: the plane is the hub the slice, stream seeds and

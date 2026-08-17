@@ -86,12 +86,20 @@ assertions need updating — the checks are deliberately concrete.
 - **Default lighting is a single camera headlight** → faces angled away go
   black (the boundary shell especially). Fixed with a `vtkLightKit` (key + fill
   + back + head, like ParaView) + `TwoSidedLightingOn` on the renderer, plus an
-  **ambient floor** on the lit actors (`set_lighting`, `light_ambient`/
-  `light_diffuse` knobs in the Colour panel, default 0.3/0.7). The ambient floor
-  is the part that reliably survives to the **vtk.js client** (local mode does
-  its own lighting; server-side lights may not serialise) — it's what guarantees
-  no face is pure black in either mode, and it lights the server-rendered report
-  PNGs. The slice stays `LightingOff` (flat, quantitative) and is left out.
+  **ambient floor** on the lit actors. Controls live in a **collapsible
+  "Lighting" panel** in the Colour section (hidden by default): a **Light kit**
+  toggle (default on; off → `RemoveAllLights` → VTK's default headlight) and
+  Ambient/Diffuse sliders (default 0.3/0.7) → `set_light_kit` / `set_lighting`.
+  The ambient floor is the part that reliably survives to the **vtk.js client**
+  (local mode does its own lighting; server-side lights may not serialise) — it
+  guarantees no face is pure black in either mode, and it lights the
+  server-rendered report PNGs. The slice stays `LightingOff` (flat) and is left
+  out. Lighting prefs are **persisted globally** to a JSON settings file
+  (`_save_settings`/`_load_settings`, default `<case_root>/.foamviz-settings.json`
+  — persistent on the CFD_HOME volume — override with `$FOAMVIZ_SETTINGS`), so
+  they survive a server restart. (The shared-session server already keeps state
+  across page reloads; the file adds cross-restart survival. Not cookies —
+  global, server-side, and verifiable.)
 - **Never pass a freshly constructed source inline.**
   `glyph.SetSourceConnection(vtk.vtkArrowSource().GetOutputPort())` **segfaults**
   — Python collects the temporary while the pipeline still references it. Keep an
