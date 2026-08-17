@@ -363,8 +363,8 @@ All of the below shipped (see "Widget re-arrangement — DONE" implementation no
   mapper association. Contour/streamlines/glyphs stay on point data.
 - ~~Slice-plane visualisation: when the mesh is shown, switch to a "crinkle
   slice".~~ **Done 2026-08-15** — the "Mesh (crinkle)" switch on the Cut plane
-  tool feeds the slice from `vtk3DLinearGridCrinkleExtractor` instead of the
-  cutter (see the implementation note below).
+  tool feeds the slice from a crinkle extractor (`vtkExtractGeometry` since
+  2026-08-17) instead of the cutter (see the implementation note below).
 
 ## To-do — implementation notes (Claude)
 
@@ -457,17 +457,22 @@ model — the earlier fraction/`plane_coord` bidirectional sync was fiddly. Now:
   boundary patches, and the cutter output. Contour/streamlines/glyphs keep
   reading the point array. (Note: auto-range still samples point data — a cell
   extreme can slightly exceed it; not worth special-casing.)
-- ~~**Crinkle slice**~~ — **Done 2026-08-15.** Not home-brewn: VTK ships the
-  purpose-built `vtk3DLinearGridCrinkleExtractor` (threaded, meant for large
-  grids — ~1 ms on the demo, the right choice for the 12 M case). It shares the
-  cutter's `vtkPlane`, so the position slider drives both; a `vtkGeometryFilter`
-  turns its unstructured output into polydata for the shared slice mapper, and
-  `update_slice` swaps the mapper's input to it when `slice_edges` is on. It
-  needs a 3D *linear* grid — fine, the reader decomposes polyhedra by default
-  (demo mesh is all hexes). `slice_edges` moved to the heavy/overlay handler
-  since it now does real extraction. (`vtkExtractGeometry` +
-  `ExtractOnlyBoundaryCells` was the general-cell-type fallback considered — not
-  needed here, and slower.)
+- ~~**Crinkle slice**~~ — **Done 2026-08-15; extractor swapped 2026-08-17.** The
+  "Mesh (crinkle)" switch feeds the slice from a crinkle extractor sharing the
+  cutter's `vtkPlane` (position slider drives both), via a `vtkGeometryFilter`
+  → polydata for the shared slice mapper; `update_slice` swaps the mapper input
+  when `slice_edges` is on (a heavy/overlay handler — real extraction).
+  - **Now `vtkExtractGeometry` + `ExtractBoundaryCellsOn`/`ExtractOnlyBoundaryCellsOn`**
+    (general, single-threaded, all cell types — ParaView-style).
+  - **Was `vtk3DLinearGridCrinkleExtractor`** (threaded 3D-linear fast path). It
+    **hung the trame server** — steady memory growth, no output, container
+    restart needed — even on small cases, while computing in ~2 ms *headlessly*.
+    Could not reproduce headlessly (so unconfirmed), but the threaded fast path
+    (vtkSMPTools) inside the async server is the prime suspect, and it is
+    linear-cells-only. The general filter removed the thread pool and gained
+    all-cell-type robustness. If it *still* hangs deployed, instrument the
+    `crinkle_surface.Update()` path (it runs during render, so no app-level log
+    today) or consider disabling crinkle behind a flag.
 
 ### Suggested order
 

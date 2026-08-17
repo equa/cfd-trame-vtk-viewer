@@ -82,16 +82,21 @@ class FoamPipeline:
         self.cutter = vtk.vtkCutter()
         self.cutter.SetCutFunction(vtk.vtkPlane())
         # Crinkle slice: the whole cells the plane passes through (the true mesh
-        # layer) rather than a flat triangulated cut. vtk3DLinearGridCrinkleExtractor
-        # is VTK's purpose-built, threaded crinkle filter -- fast enough for the
-        # big case; it needs a 3D *linear* grid, which the reader gives us (it
-        # decomposes polyhedra by default). It shares the cutter's plane, so the
-        # position slider moves both. vtkGeometryFilter turns its unstructured
-        # output into polydata for the shared slice mapper.
-        self.crinkle = vtk.vtk3DLinearGridCrinkleExtractor()
+        # layer) rather than a flat triangulated cut. Uses the general
+        # single-threaded vtkExtractGeometry -- NOT vtk3DLinearGridCrinkleExtractor
+        # (VTK's threaded 3D-linear fast path): that hung the trame server (steady
+        # memory growth, no output, needs a restart), most likely its vtkSMPTools
+        # thread pool misbehaving inside the async server, and it only handles
+        # linear cells. vtkExtractGeometry is the robust, all-cell-type extraction
+        # ParaView-style crinkle relies on; slower, but crinkle is a deliberate
+        # "show the mesh" action. ExtractOnlyBoundaryCells keeps exactly the cells
+        # the plane straddles. It shares the cutter's plane, so the position
+        # slider moves both; vtkGeometryFilter turns the unstructured output into
+        # polydata for the shared slice mapper.
+        self.crinkle = vtk.vtkExtractGeometry()
         self.crinkle.SetImplicitFunction(self.cutter.GetCutFunction())
-        self.crinkle.SetCopyCellData(True)
-        self.crinkle.SetCopyPointData(True)
+        self.crinkle.ExtractBoundaryCellsOn()
+        self.crinkle.ExtractOnlyBoundaryCellsOn()
         self.crinkle_surface = vtk.vtkGeometryFilter()
         self.crinkle_surface.SetInputConnection(self.crinkle.GetOutputPort())
 
