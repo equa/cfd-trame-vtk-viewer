@@ -107,24 +107,31 @@ def main():
     check("plane outline is planar", len(zs) == 1, str(zs))
     check("plane outline sits at the cut height", abs(next(iter(zs)) - zmid) < 1e-6)
 
-    # building geometry (OBJ): the demo case ships a room-box building.obj
+    # building geometry (OBJ): the demo case ships a room-box building.obj.
+    # Only the shown geometry actor is in the scene (add/remove, so the client
+    # never gets geometry it isn't showing); off = nothing, and the OBJ is not
+    # even read until geometry is shown. Laziness checks come first, before any
+    # Update() would read the file.
     check("case ships building.obj", pipe.has_geometry)
+
+    def geo_scene():
+        return (bool(pipe.renderer.HasViewProp(pipe.geometry_edges_actor)),
+                bool(pipe.renderer.HasViewProp(pipe.geometry_wire_actor)))
+    check("geometry off -> OBJ not read yet",
+          pipe.geometry_reader.GetOutput().GetNumberOfPoints() == 0)
+    check("geometry off -> neither actor in scene", geo_scene() == (False, False), str(geo_scene()))
+
+    pipe.update_geometry(True, "features", 1.0, 2.0)
+    check("features -> only edges actor in scene", geo_scene() == (True, False), str(geo_scene()))
     pipe.geometry_features.Update()
     check("feature edges extracted", pipe.geometry_features.GetOutput().GetNumberOfCells() > 0,
           f"{pipe.geometry_features.GetOutput().GetNumberOfCells()} edges")
-
-    # mode switching toggles the two fixed actors — never both, and the
-    # wireframe->features round-trip returns to edges-only (the reported bug).
-    def geo_vis():
-        return (pipe.geometry_edges_actor.GetVisibility(), pipe.geometry_wire_actor.GetVisibility())
-    pipe.update_geometry(True, "features", 1.0, 2.0)
-    check("features -> edges actor only", geo_vis() == (1, 0), str(geo_vis()))
     pipe.update_geometry(True, "wireframe", 1.0, 2.0)
-    check("wireframe -> wire actor only", geo_vis() == (0, 1), str(geo_vis()))
+    check("wireframe -> only wire actor in scene", geo_scene() == (False, True), str(geo_scene()))
     pipe.update_geometry(True, "features", 1.0, 2.0)
-    check("wireframe->features round-trip -> edges only", geo_vis() == (1, 0), str(geo_vis()))
+    check("wireframe->features round-trip -> only edges", geo_scene() == (True, False), str(geo_scene()))
     pipe.update_geometry(False, "features", 1.0, 2.0)
-    check("hidden -> neither actor", geo_vis() == (0, 0), str(geo_vis()))
+    check("hidden -> neither actor in scene", geo_scene() == (False, False), str(geo_scene()))
 
     pipe.update_surface(True, True, 0.3, False, True, False)
     pipe.surface_clip.Update()

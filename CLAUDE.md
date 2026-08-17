@@ -201,13 +201,19 @@ buoyancy-driven room airflow with a thermal plume, steady state.
   `building\d*\.obj` and takes the first (bare name first, then by index).
   Shows it as **feature edges** (`vtkFeatureEdges`, a clean architectural line
   drawing — default) or **wireframe** (the raw surface), with opacity +
-  line-width. **Two fixed-input actors toggled by visibility** — NOT one actor
-  whose mapper input/representation is swapped live: swapping corrupted the
-  vtk.js client (after a wireframe round-trip, feature edges came back as filled
-  triangles — the synchronizer kept the stale input). `update_geometry` just
-  flips `geometry_edges_actor`/`geometry_wire_actor` visibility; state
-  `geometry_visible/mode/opacity/line_width`; cheap handler. Only `building.obj`
-  for now — more `triSurface` files are a later extension.
+  line-width. **Two fixed-input actors** (`geometry_edges_actor` /
+  `geometry_wire_actor`), and `update_geometry` **adds only the one being shown
+  to the renderer** (add/remove, not hide-in-place):
+  - *Not* one actor whose mapper input/representation is swapped live — that
+    corrupted the vtk.js client (after a wireframe round-trip, feature edges came
+    back as filled triangles: the synchronizer kept the stale input).
+  - *Not* both-in-scene-and-hidden either — local mode serialises every actor in
+    the scene regardless of visibility, so the wireframe surface (a potentially
+    huge triangle mesh) would be shipped to the browser even in feature-edges
+    mode, and the OBJ read server-side even with geometry off. Add/remove means:
+    off → nothing read or shipped; features → edges only; wireframe → the surface.
+  State `geometry_visible/mode/opacity/line_width`; cheap handler. Only
+  `building.obj` (or `building<N>.obj`) for now — more `triSurface` files later.
 - **Red plane outline is now drag-only.** Hidden by default; the position
   slider's `start`/`end` show/hide it (`plane_drag_start` /
   `plane_slider_release` + `set_plane_outline_visible`); `_on_plane_slide` moves

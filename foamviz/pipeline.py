@@ -237,6 +237,12 @@ class FoamPipeline:
             prop.SetColor(0.85, 0.87, 0.92)
             prop.LightingOff()
             actor.SetVisibility(0)
+        # Neither geometry actor is added to the renderer up front: update_geometry
+        # adds only the one being shown. In local mode the client serialises every
+        # actor in the scene (hidden or not), so an unused wireframe surface -- which
+        # can be a very large triangle mesh -- would otherwise be shipped to the
+        # browser and the OBJ read server-side even with geometry off.
+        self._geometry_actor_in_scene = None
 
         # --- orientation triad ---------------------------------------------
         self.triad_actors = self._build_triad()
@@ -248,8 +254,6 @@ class FoamPipeline:
             self.contour_actor,
             self.stream_actor,
             self.glyph_actor,
-            self.geometry_edges_actor,
-            self.geometry_wire_actor,
             *self.triad_actors,
         ):
             self.renderer.AddActor(actor)
@@ -516,12 +520,25 @@ class FoamPipeline:
 
     def update_geometry(self, visible, mode, opacity, line_width):
         """Building geometry: feature edges (clean line drawing) or wireframe.
-        Just toggles which of the two fixed actors is shown -- no live input /
-        representation swapping (see the note in _build_filters)."""
-        show = bool(visible) and self.has_geometry
-        self.geometry_edges_actor.SetVisibility(1 if (show and mode != "wireframe") else 0)
-        self.geometry_wire_actor.SetVisibility(1 if (show and mode == "wireframe") else 0)
+
+        Adds only the actor being shown to the renderer (add/remove, not
+        hide-in-place) so the client never receives the geometry it isn't
+        showing -- and nothing at all when geometry is off. No live mapper input
+        / representation swapping either (that corrupted the client; see
+        _build_filters)."""
+        want = None
+        if bool(visible) and self.has_geometry:
+            want = self.geometry_wire_actor if mode == "wireframe" else self.geometry_edges_actor
+
+        if self._geometry_actor_in_scene is not want:
+            if self._geometry_actor_in_scene is not None:
+                self.renderer.RemoveActor(self._geometry_actor_in_scene)
+            if want is not None:
+                self.renderer.AddActor(want)
+            self._geometry_actor_in_scene = want
+
         for actor in (self.geometry_edges_actor, self.geometry_wire_actor):
+            actor.SetVisibility(1 if actor is want else 0)
             prop = actor.GetProperty()
             prop.SetOpacity(float(opacity))
             prop.SetLineWidth(float(line_width))
