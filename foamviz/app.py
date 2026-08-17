@@ -1231,7 +1231,7 @@ class FoamViz:
         """Building geometry from constant/triSurface/building.obj."""
         with _section(title, icon):
             html.Div(
-                "No constant/triSurface/building.obj in this case.",
+                "No building.obj (or building<N>.obj) in constant/triSurface.",
                 v_if="!has_geometry",
                 classes="text-caption text-medium-emphasis mb-2",
             )

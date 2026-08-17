@@ -15,6 +15,8 @@ depends on it. For room airflow that matches how people actually look at a
 result: pick a plane, then ask what the air is doing on it.
 """
 
+import re
+
 import numpy as np
 import vtk
 from vtkmodules.util.numpy_support import numpy_to_vtk, vtk_to_numpy
@@ -332,10 +334,21 @@ class FoamPipeline:
     def set_case(self, case):
         self.case = case
         # Building geometry, if the case ships one. Read once per case (static).
-        obj = case.case_dir / "constant" / "triSurface" / "building.obj"
-        self.has_geometry = obj.is_file()
-        if self.has_geometry:
-            self.geometry_reader.SetFileName(str(obj))
+        # setupIceCase indexes geometry to avoid clashes, so the file may be
+        # building.obj or building<N>.obj (e.g. building10.obj). Take the first
+        # match (usually the only one); bare `building.obj` sorts first, then by
+        # index.
+        self.has_geometry = False
+        tri = case.case_dir / "constant" / "triSurface"
+        if tri.is_dir():
+            objs = sorted(
+                (p for p in tri.iterdir()
+                 if p.is_file() and re.fullmatch(r"building\d*\.obj", p.name)),
+                key=lambda p: int(re.sub(r"\D", "", p.name) or "-1"),
+            )
+            if objs:
+                self.geometry_reader.SetFileName(str(objs[0]))
+                self.has_geometry = True
         self.vector_field = "U" if "U" in case.vector_fields else (
             case.vector_fields[0] if case.vector_fields else None
         )

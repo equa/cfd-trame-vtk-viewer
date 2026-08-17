@@ -194,8 +194,11 @@ buoyancy-driven room airflow with a thermal plume, steady state.
 
 ## Geometry tool + outline changes (2026-08-17)
 
-- **Geometry tool** (6th tool): reads `constant/triSurface/building.obj` via
-  `vtkOBJReader` (once per case, in `set_case`; `has_geometry` gates the UI).
+- **Geometry tool** (6th tool): reads a building OBJ from `constant/triSurface/`
+  via `vtkOBJReader` (once per case, in `set_case`; `has_geometry` gates the UI).
+  setupIceCase indexes geometry, so the file is `building.obj` **or**
+  `building<N>.obj` (e.g. `building10.obj`) — `set_case` searches
+  `building\d*\.obj` and takes the first (bare name first, then by index).
   Shows it as **feature edges** (`vtkFeatureEdges`, a clean architectural line
   drawing — default) or **wireframe** (`SetRepresentationToWireframe` on the raw
   surface), with opacity + line-width. `update_geometry` in the pipeline; state
