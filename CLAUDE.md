@@ -288,12 +288,18 @@ renderer the client already uses, so the report looks identical to the live view
 `<case>/report/` (Niklas confirmed cfd-viz has write access to `CFD_HOME`).
 
 **DONE — capture (this repo).** The toolbar "Report" button → `add_to_report`
-writes three files per figure into `<case>/report/`: `figure_NN.vtkjs` (the
-scene: `vtkJSONSceneExporter` output, zipped), `figure_NN.png` (poster/print),
-`figure_NN.json` (caption + field/component/range/preset/n_colors, so the report
-redraws the colour bar from `colors.py`). Caption comes from a state field or
-`_auto_caption()`. `push_remote_camera_on_end_interaction()` keeps the server
-camera synced to the client's orbit, so the export frames what the user set up.
+writes per figure into `<case>/report/`: `figure_NN.png` (poster/print) and
+`figure_NN.json` (caption + field/component/range/preset/n_colors + gradient +
+ticks, so the report redraws the colour bar from `colors.py` — the poster is the
+3D view only, no legend). Caption comes from a state field or `_auto_caption()`.
+`push_remote_camera_on_end_interaction()` keeps the server camera synced to the
+client's orbit, so the export frames what the user set up.
+
+**vtk.js scene export is MOTHBALLED (2026-08-17):** `figure_NN.vtkjs`
+(`vtkJSONSceneExporter` output, zipped) is no longer written — the interactive
+report viewer is shelved, and unused scenes just pile up on disk. Gated behind
+`EXPORT_VTKJS = False`; `write_vtkjs` and the zip code are kept, so it's a
+one-line flip to re-enable once a viewer is built.
 
 - **Trap:** `vtkJSONSceneExporter` leaves the render window in a state that
   **segfaults** a subsequent `vtkWindowToImageFilter`. So capture the PNG
