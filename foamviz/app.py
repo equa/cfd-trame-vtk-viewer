@@ -80,12 +80,9 @@ TOOLS = [
 # handler, so there's no separate JS<->Python wiring. Shift yields an uppercase
 # key (so shift+x -> -x). (vtk.js already binds "r" to reset the camera.)
 KEY_SHORTCUTS = {
-    "x": ".js-view-px",
-    "X": ".js-view-mx",
-    "y": ".js-view-py",
-    "Y": ".js-view-my",
-    "z": ".js-view-pz",
-    "Z": ".js-view-mz",
+    "x": ".js-view-px", "X": ".js-view-mx",
+    "y": ".js-view-py", "Y": ".js-view-my",
+    "z": ".js-view-pz", "Z": ".js-view-mz",
 }
 
 # One window-level keydown listener that dispatches KEY_SHORTCUTS by clicking the
@@ -344,20 +341,19 @@ class FoamViz:
         self._loading = False
         self._rescale()
         self.update_scene(reset_camera=True)
-        log.info(
-            "loaded case %s: %d cells, %d step(s)%s",
-            name,
-            self.case.n_cells(),
-            len(self.case.times),
-            " (decomposed)" if self.case.decomposed else "",
-        )
+        log.info("loaded case %s: %d cells, %d step(s)%s",
+                 name, self.case.n_cells(), len(self.case.times),
+                 " (decomposed)" if self.case.decomposed else "")
 
     def _case_info_text(self):
         """Drawer caption: cell count, steps, patches, and the reader mode
         (``decomposed`` when reading processor* dirs via vtkPOpenFOAMReader)."""
         c = self.case
         mode = " · decomposed" if getattr(c, "decomposed", False) else ""
-        return f"{c.n_cells():,} cells · {len(c.times)} time steps · {len(c.patches)} patches{mode}"
+        return (
+            f"{c.n_cells():,} cells · {len(c.times)} time steps · "
+            f"{len(c.patches)} patches{mode}"
+        )
 
     def _push_field_lists(self):
         """Refresh the field/vector selectors from the loaded step's actual
@@ -508,7 +504,9 @@ class FoamViz:
         """Recompute the colour range from the data, honouring the range mode."""
         if self.case is None:
             return
-        lo, hi = self.case.field_range(self.state.color_field, self.state.color_component, self.state.robust_range)
+        lo, hi = self.case.field_range(
+            self.state.color_field, self.state.color_component, self.state.robust_range
+        )
         if hi - lo < 1e-12:  # a uniform field still needs a drawable range
             lo, hi = lo - 0.5, hi + 0.5
         with self.state:
@@ -521,7 +519,9 @@ class FoamViz:
         label = self.state.color_field or ""
         if self.state.component_enabled:
             label += f" ({self.state.color_component})"
-        self.state.legend_gradient = colors.css_gradient(self.state.preset, n_colors=int(self.state.n_colors or 0))
+        self.state.legend_gradient = colors.css_gradient(
+            self.state.preset, n_colors=int(self.state.n_colors or 0)
+        )
         # Top-to-bottom, matching the vertical gradient.
         values = [hi - (hi - lo) * i / 4 for i in range(5)]
         self.state.legend_ticks = _format_ticks(values)
@@ -590,7 +590,8 @@ class FoamViz:
             if name not in self.case_paths:
                 self._rescan_cases()
             if name not in self.case_paths:
-                log.warning("preselect: unknown case %r (have %s)", name, sorted(self.case_paths))
+                log.warning("preselect: unknown case %r (have %s)",
+                            name, sorted(self.case_paths))
                 return
             if self.case is None or name != self.case.name:
                 log.info("preselect: loading case %s", name)
@@ -826,7 +827,9 @@ class FoamViz:
             # The report has no access to the LUT, and the poster PNG shows only
             # the 3D view (not the legend), so ship the exact colour bar with the
             # figure: the same gradient + ticks the on-screen legend uses.
-            "gradient": colors.css_gradient(self.state.preset, n_colors=int(self.state.n_colors or 0)),
+            "gradient": colors.css_gradient(
+                self.state.preset, n_colors=int(self.state.n_colors or 0)
+            ),
             "ticks": list(self.state.legend_ticks),
         }
         (report_dir / f"{stem}.json").write_text(json.dumps(meta, indent=2))
@@ -838,21 +841,18 @@ class FoamViz:
             self.state.report_snack = True
 
     def _next_report_index(self, report_dir):
-        used = [int(p.stem.split("_")[1]) for p in report_dir.glob("figure_*.json") if p.stem.split("_")[1].isdigit()]
+        used = [int(p.stem.split("_")[1]) for p in report_dir.glob("figure_*.json")
+                if p.stem.split("_")[1].isdigit()]
         return max(used, default=0) + 1
 
     def _auto_caption(self):
         """A caption from what is on screen, when the user did not type one."""
-        shown = [
-            name
-            for flag, name in (
-                (self.state.slice_visible, "slice"),
-                (self.state.contour_visible, "isosurfaces"),
-                (self.state.stream_visible, "streamlines"),
-                (self.state.glyph_visible, "arrows"),
-            )
-            if flag
-        ] or ["boundary"]
+        shown = [name for flag, name in (
+            (self.state.slice_visible, "slice"),
+            (self.state.contour_visible, "isosurfaces"),
+            (self.state.stream_visible, "streamlines"),
+            (self.state.glyph_visible, "arrows"),
+        ) if flag] or ["boundary"]
         return f"{self.state.color_field or ''} — {', '.join(shown)}".strip(" —")
 
     @controller.set("set_view")
@@ -1071,12 +1071,12 @@ class FoamViz:
             # panels are only hidden (v-show), not unmounted, so their state and
             # their representations survive a tool switch.
             builders = {
-                "geometry": self._tool_geometry,
-                "boundary": self._tool_boundary,
                 "cutplane": self._tool_cutplane,
-                "glyph": self._tool_glyph,
+                "boundary": self._tool_boundary,
                 "contour": self._tool_contour,
                 "stream": self._tool_stream,
+                "glyph": self._tool_glyph,
+                "geometry": self._tool_geometry,
             }
             for key, title, icon in TOOLS:
                 with html.Div(v_show=(f"active_tool === '{key}'",)):
@@ -1205,7 +1205,9 @@ class FoamViz:
             # the source of truth and take effect on Apply.
             with html.Div(classes="d-flex justify-space-between mt-1"):
                 html.Span("Position", classes="text-caption text-medium-emphasis")
-                html.Span("{{ Number(plane_slider).toFixed(2) }} m", classes="text-caption")
+                html.Span(
+                    "{{ Number(plane_slider).toFixed(2) }} m", classes="text-caption"
+                )
             v3.VSlider(
                 v_model=("plane_slider",),
                 min=("axis_min",),
@@ -1220,7 +1222,8 @@ class FoamViz:
                 classes="js-plane-slider",
             )
             with html.Div(classes="d-flex mt-2", style="gap: 6px"):
-                v3.VTextField(v_model_number=("plane_x", 0.0), label="X", type="number", classes="js-plane-x", **_FIELD)
+                v3.VTextField(v_model_number=("plane_x", 0.0), label="X", type="number",
+                              classes="js-plane-x", **_FIELD)
                 v3.VTextField(v_model_number=("plane_y", 0.0), label="Y", type="number", **_FIELD)
                 v3.VTextField(v_model_number=("plane_z", 0.0), label="Z", type="number", **_FIELD)
             v3.VBtn(
