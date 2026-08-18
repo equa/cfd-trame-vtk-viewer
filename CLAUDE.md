@@ -128,6 +128,14 @@ assertions need updating — the checks are deliberately concrete.
   only *refits* the client's own orientation, so calling it after a preset
   clobbered the orientation — which is why the X/Y/Z/Iso view buttons "never
   worked". `set_view` and the initial `reset_camera=True` load now push instead.
+  - **Corollary — never `push_remote_camera_on_end_interaction()` in local
+    mode.** That observer fires on every EndInteraction (mouse up / leave) and
+    `setCamera()`s the server camera onto the client, which re-applies the focal
+    point and **resets the client's centre of rotation** — orbiting felt broken
+    and needed constant R. Removed 2026-08-18. Pushing a camera to the client is
+    fine on a *deliberate* action (a view button); doing it on every mouse-up is
+    not. The server camera already tracks the client in local mode, so it gained
+    nothing.
 - **Keyboard shortcuts are extensible via `KEY_SHORTCUTS`** (`app.py`): a pressed
   `event.key` → a CSS selector, and one injected `window` keydown listener
   (`client.Script`, `_KEY_JS_TEMPLATE`) clicks the matched element. So a shortcut
@@ -379,8 +387,11 @@ writes per figure into `<case>/report/`: `figure_NN.png` (poster/print) and
 `figure_NN.json` (caption + field/component/range/preset/n_colors + gradient +
 ticks, so the report redraws the colour bar from `colors.py` — the poster is the
 3D view only, no legend). Caption comes from a state field or `_auto_caption()`.
-`push_remote_camera_on_end_interaction()` keeps the server camera synced to the
-client's orbit, so the export frames what the user set up.
+The server render window's camera already tracks the client's orbit in local mode
+(that's also how the Client→Server switch works), so the server-side screenshot
+frames what the user set up. (Do NOT use `push_remote_camera_on_end_interaction()`
+for this — see the camera trap under "Trame traps": it resets the client's centre
+of rotation on every mouse-up. It was removed 2026-08-18.)
 
 **vtk.js scene export is MOTHBALLED (2026-08-17):** `figure_NN.vtkjs`
 (`vtkJSONSceneExporter` output, zipped) is no longer written — the interactive

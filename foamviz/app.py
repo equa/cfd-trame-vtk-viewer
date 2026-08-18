@@ -1288,9 +1288,14 @@ class FoamViz:
                 # is invisible until pushed (this is why the view buttons never
                 # worked -- reset_camera only refit the client's own orientation).
                 self.ctrl.view_push_camera = view.push_camera
-                # Keep the server camera in step with the client's orbit, so a
-                # report figure (exported server-side) frames what the user set up.
-                view.push_remote_camera_on_end_interaction()
+                # NB: do NOT push_remote_camera_on_end_interaction() here. In local
+                # mode that observer fires on every EndInteraction (mouse up / leave
+                # canvas) and setCamera()s the SERVER camera onto the client, which
+                # re-applies the focal point and resets the client's center of
+                # rotation -- so orbiting felt broken and needed constant R. The
+                # server camera already tracks the client in local mode (that's how
+                # the Client→Server switch and the report screenshot work), so it
+                # bought nothing anyway.
 
                 self._legend()
                 self._bottom_bar()
