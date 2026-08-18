@@ -144,6 +144,21 @@ assertions need updating — the checks are deliberately concrete.
   key (shift+x → `-x`). vtk.js already binds `r` to reset the camera.
   (`client.Script` renders as `<trame-script :script="trame__inline_script_N">`;
   the JS lives in that state var and runs client-side, like `client.Style`.)
+- **`F` sets the centre of rotation from the point under the cursor**
+  (ParaView-style focus). Unlike the axis shortcuts it needs the pointer
+  position *and* a server round-trip, so it cannot ride the click-a-button
+  bridge. `_FOCUS_JS` tracks the cursor and, on `F` over the 3D `<canvas>`,
+  calls `window.trame.trigger('foamviz_pick_cor', [x, y, w, h])` — trame's own
+  client→server call (`window.trame` exposes `.trigger(name, args, kwargs)`,
+  the general JS→Python path when there's no button to click). The trigger is
+  registered imperatively (`self.server.trigger(name)(fn)`; there is no
+  `@controller.trigger` decorator). Server side, `pipeline.pick_cor` sizes the
+  offscreen window to the client canvas so the projection aspect matches, casts
+  a `vtkCellPicker`, and — since vtk.js orbits the *focal point* (no separate
+  COR) — sets focal point to the pick and slides the camera along its view
+  direction so the point lands at screen centre (view direction + distance
+  preserved: no tilt, no zoom, just a pan-to-centre). Then `view_push_camera` +
+  `view_update`. A miss (empty space) is a silent no-op.
 - **`VBtnToggle(...).add_children([VBtn(...), ...])` renders the buttons twice.**
   A widget constructed while another element is the active parent attaches
   there too. Build children inside `with toggle:`.

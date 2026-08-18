@@ -641,6 +641,42 @@ class FoamPipeline:
     def reset_camera(self):
         self.renderer.ResetCamera()
 
+    def pick_cor(self, x, y, w, h):
+        """Set the centre of rotation from a point picked on the client canvas.
+
+        ``x, y`` are display coordinates (VTK origin: bottom-left) in the client
+        canvas of size ``w x h``. We size the offscreen window to match, so the
+        projection aspect equals the client's and the pick ray lines up with
+        what the user sees, then cast it with a cell picker.
+
+        vtk.js orbits about the camera *focal point* -- there is no separate
+        centre of rotation -- so to pivot about the picked point P we set the
+        focal point to P and slide the camera along its current view direction
+        so P lands at screen centre. View direction and distance are preserved,
+        so the scene neither tilts nor zooms: it only pans P to the middle and
+        rotates about it thereafter. Returns True if the ray hit geometry."""
+        if w <= 0 or h <= 0:
+            return False
+        self.render_window.SetSize(int(w), int(h))
+        self.render_window.Render()
+        picker = vtk.vtkCellPicker()
+        picker.SetTolerance(0.0005)
+        if not picker.Pick(x, y, 0, self.renderer):
+            return False
+        target = np.array(picker.GetPickPosition())
+        camera = self.renderer.GetActiveCamera()
+        pos = np.array(camera.GetPosition())
+        focal = np.array(camera.GetFocalPoint())
+        view_dir = focal - pos
+        distance = np.linalg.norm(view_dir)
+        if distance == 0:
+            return False
+        view_dir = view_dir / distance
+        camera.SetFocalPoint(*target)
+        camera.SetPosition(*(target - view_dir * distance))
+        self.renderer.ResetCameraClippingRange()
+        return True
+
     def set_view(self, direction):
         """Look along a named axis: ``+x``, ``-x``, ``+y`` ... or ``iso``.
 

@@ -104,6 +104,43 @@ _KEY_JS_TEMPLATE = """
 })();
 """
 
+# "F" sets the centre of rotation to the point under the cursor (ParaView-style).
+# Unlike the axis shortcuts it needs the pointer position and a value back from
+# the server, so it can't ride the click-a-button bridge: it tracks the cursor
+# and, on F over the 3D canvas, hands display coords to the server trigger
+# (registered as "foamviz_pick_cor"). window.trame.trigger is trame's own
+# client->server call, so no extra wiring. The server picks and repositions the
+# camera, then pushes it back to the client (see _pick_cor / pipeline.pick_cor).
+_FOCUS_JS = """
+(function () {
+  if (window.__foamvizFocus) return;
+  window.__foamvizFocus = true;
+  let lastX = 0, lastY = 0;
+  window.addEventListener('mousemove', function (e) {
+    lastX = e.clientX; lastY = e.clientY;
+  }, true);
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'f' && e.key !== 'F') return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const stage = document.querySelector('.foamviz-stage');
+    if (!stage) return;
+    const el = document.elementFromPoint(lastX, lastY);
+    if (!el || el.tagName !== 'CANVAS' || !stage.contains(el)) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    const x = lastX - r.left;
+    // VTK display origin is bottom-left; the browser's is top-left.
+    const y = r.height - (lastY - r.top);
+    if (window.trame && window.trame.trigger) {
+      window.trame.trigger('foamviz_pick_cor', [x, y, r.width, r.height]);
+      e.preventDefault();
+    }
+  }, true);
+})();
+"""
+
 
 @TrameApp()
 class FoamViz:
@@ -824,6 +861,15 @@ class FoamViz:
         self.ctrl.view_push_camera()  # push orientation to the client (local mode)
         self.ctrl.view_update()
 
+    def _pick_cor(self, x, y, w, h):
+        """Trigger target for the F-key focus (see _FOCUS_JS). Picks the point
+        under the cursor and pivots the camera about it, pushing the new camera
+        to the client. Silent no-op when the ray misses geometry (empty space),
+        so pressing F off-model leaves the current centre untouched."""
+        if self.pipeline.pick_cor(x, y, w, h):
+            self.ctrl.view_push_camera()
+            self.ctrl.view_update()
+
     @controller.set("toggle_play")
     def toggle_play(self):
         self.state.playing = not self.state.playing
@@ -939,6 +985,8 @@ class FoamViz:
             layout.title.set_text("FoamViz")
             client.Style(_CSS)
             client.Script(_KEY_JS_TEMPLATE.replace("__MAP__", json.dumps(KEY_SHORTCUTS)))
+            client.Script(_FOCUS_JS)
+            self.server.trigger("foamviz_pick_cor")(self._pick_cor)
 
             with layout.icon:
                 v3.VIcon("mdi-air-filter")

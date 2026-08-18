@@ -195,6 +195,21 @@ def main():
               pipe.glyph.GetOutput().GetNumberOfPoints() > 0,
               f"{pipe.glyph.GetOutput().GetNumberOfPoints()} pts")
 
+    print("\ncentre-of-rotation pick (F-key focus)")
+    pipe.set_view("iso")
+    cam = pipe.renderer.GetActiveCamera()
+    d0 = np.array(cam.GetFocalPoint()) - np.array(cam.GetPosition())
+    dist0 = np.linalg.norm(d0)
+    hit = pipe.pick_cor(400, 300, 800, 600)  # canvas centre -> onto the model
+    check("centre pick hits geometry", hit)
+    d1 = np.array(cam.GetFocalPoint()) - np.array(cam.GetPosition())
+    check("focus keeps view direction", np.allclose(d0 / dist0, d1 / np.linalg.norm(d1), atol=1e-6))
+    check("focus keeps zoom (distance)", np.isclose(dist0, np.linalg.norm(d1), rtol=1e-6))
+    fp_before = np.array(cam.GetFocalPoint())
+    miss = pipe.pick_cor(2, 2, 800, 600)  # corner -> empty space
+    check("miss is a no-op", (not miss) and np.allclose(fp_before, cam.GetFocalPoint()))
+    check("bad canvas size guarded", pipe.pick_cor(10, 10, 0, 0) is False)
+
     print("\nrendering (offscreen / OSMesa)")
     pipe.set_view("iso")
     pipe.render_window.Render()
