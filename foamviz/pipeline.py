@@ -679,6 +679,12 @@ class FoamPipeline:
         scale of 2 yields the same frame repeated in a 2x2 grid rather than a
         higher-resolution image. At scale 1 the capture is the window's own size
         (which, with a live client, is the client's viewport)."""
+        # Refit the near/far clipping planes to the scene from the *current*
+        # camera. In local mode the client pushes its camera position to the
+        # server on zoom but not its clipping range, so a zoomed-in shot would
+        # otherwise clip against a stale near plane (only the far side survives).
+        # This adjusts the planes only -- it does not move the camera.
+        self.renderer.ResetCameraClippingRange()
         # Ensure a current frame in the buffer: without a live client driving it
         # (report export) the window may be unrendered, or left perturbed by the
         # scene exporter -- either segfaults vtkWindowToImageFilter otherwise.
