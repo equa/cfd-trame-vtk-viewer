@@ -87,7 +87,7 @@ assertions need updating — the checks are deliberately concrete.
   black (the boundary shell especially). Fixed with a `vtkLightKit` (key + fill
   + back + head, like ParaView) + `TwoSidedLightingOn` on the renderer, plus an
   **ambient floor** on the lit actors. Controls live in a **collapsible
-  "Lighting" panel** in the Colour section (hidden by default): a **Light kit**
+  "Lighting" panel** at the bottom of the side pane (hidden by default): a **Light kit**
   toggle (default on; off → `RemoveAllLights` → VTK's default headlight) and
   Ambient/Diffuse sliders (default 0.3/0.7) → `set_light_kit` / `set_lighting`.
   The ambient floor is the part that reliably survives to the **vtk.js client**
@@ -525,15 +525,25 @@ model — the earlier fraction/`plane_coord` bidirectional sync was fiddly. Now:
 
 ### Widget re-arrangement — DONE 2026-08-15
 
-- **`TOOLS` is the single source** for the five tools (key, title, icon). It
-  drives both the top-bar `VBtnToggle` (bound to `active_tool`) and the drawer
-  sections, so they can't drift. Each tool has a `_tool_<key>(title, icon)`
-  builder; `_drawer()` loops `TOOLS` and wraps each in a `v-show` div.
+- **`TOOLS` is the single source** for the six tools (key, title, icon). It
+  drives both the side-pane **tool stack** (`_tool_stack()`, bound to
+  `active_tool`) and the settings sections, so they can't drift. Each tool has a
+  `_tool_<key>(title, icon)` builder; `_drawer()` loops `TOOLS` and wraps each in
+  a `v-show` div. `TOOL_VISIBLE` maps each tool key → its actor-visibility state
+  var (the eye toggle).
+- **Layout (rearranged 2026-08-21):** global **Colour** settings live in the
+  **top bar** (essentials inline: Field/Component/Colour map/Bands/Rescale; the
+  rest — range mode, min/max, cell values — behind an "Options" `VMenu` with
+  `activator="parent"`). The **side pane** holds the vertical tool stack at top
+  (each row: a tool button that selects its settings + an **eye toggle**,
+  `mdi-eye`/`mdi-eye-off`, that flips the actor's `*_visible` var directly), the
+  selected tool's settings below, then the collapsible Lighting panel.
 - **Tools are control-only, not visibility.** Selecting a tool only changes which
-  controls the drawer shows (`v-show`, so panels stay mounted and keep their
-  state). What's drawn is still each representation's own "Show …" switch, so a
-  slice + streamlines + isosurfaces can all be visible while you tweak just one.
-  This is the key idea that made the refactor clean — no per-tool render logic.
+  settings show (`v-show`, so panels stay mounted and keep their state).
+  Visibility is the separate per-row eye toggle, so a slice + streamlines +
+  isosurfaces can all be visible while you tweak just one. The eye sets the
+  `*_visible` state var client-side; its `@change` handler (`_on_cheap` /
+  `_on_heavy`) updates the actor — no per-tool render logic.
 - **Cut-plane-hub question, resolved:** the plane controls live in the "Cut
   plane" tool (merged with the slice, per spec), and the "Slice, stream seeds and
   arrows all sit on this plane" caption stays. Moving the seeding plane while

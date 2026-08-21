@@ -62,9 +62,9 @@ VIEW_BUTTONS = [
     ("Iso", "iso"),
 ]
 
-# The drawer's widget tools. One entry drives both the top-bar selector button
-# and the matching drawer section (built by ``_tool_<key>``), so the two can't
-# drift. Colouring is not here — it stays permanently visible above the tools.
+# The drawer's widget tools. One entry drives both the side-pane tool button and
+# the matching settings section (built by ``_tool_<key>``), so the two can't
+# drift. Colouring is not here — it's a global setting that lives in the top bar.
 TOOLS = [
     ("cutplane", "Cut plane", "mdi-square-outline"),
     ("boundary", "Boundary", "mdi-cube-outline"),
@@ -73,6 +73,18 @@ TOOLS = [
     ("glyph", "Arrows", "mdi-arrow-top-right"),
     ("geometry", "Geometry", "mdi-home-outline"),
 ]
+
+# The actor-visibility state var each tool's "Show" eye toggle flips. Each of
+# these is watched by a @change handler (see _on_cheap / _on_heavy), so setting
+# it client-side updates the actor without opening the tool's settings.
+TOOL_VISIBLE = {
+    "cutplane": "slice_visible",
+    "boundary": "surface_visible",
+    "contour": "contour_visible",
+    "stream": "stream_visible",
+    "glyph": "glyph_visible",
+    "geometry": "geometry_visible",
+}
 
 # Keyboard shortcuts, extensibly: a pressed key (event.key) -> a CSS selector to
 # click. Reusable for any button-backed action -- add a row here and give the
@@ -999,22 +1011,82 @@ class FoamViz:
                 html.Span("{{ report_msg }}")
 
     def _toolbar(self):
+        # Global colour settings live in the top bar (they affect every actor).
+        # Essentials sit inline; the rest are behind the "Options" menu to keep
+        # the bar tidy. The per-tool selector moved to the side pane (_tool_stack).
         with self.ui.toolbar:
-            v3.VSpacer()
-
-            # Widget-tool selector: picks which tool's controls the drawer shows
-            # (see TOOLS / _drawer). It only drives the side panel, not what's
-            # rendered -- each representation keeps its own "Show ..." switch, so
-            # several can be visible at once regardless of the selected tool.
-            with v3.VBtnToggle(
-                v_model=("active_tool", "cutplane"),
-                mandatory=True,
-                density="comfortable",
-                variant="outlined",
-                divided=True,
-            ):
-                for key, title, icon in TOOLS:
-                    v3.VBtn(title, value=key, prepend_icon=icon, size="small")
+            v3.VSelect(
+                v_model=("color_field", None),
+                items=("field_items",),
+                label="Field",
+                style="max-width: 150px",
+                classes="mx-1 js-color-field",
+                **_SELECT_BASE,
+            )
+            v3.VSelect(
+                v_model=("color_component", "magnitude"),
+                items=("components", COMPONENTS),
+                item_title="title",
+                item_value="value",
+                label="Component",
+                disabled=("!component_enabled",),
+                style="max-width: 140px",
+                classes="mx-1 js-color-component",
+                **_SELECT_BASE,
+            )
+            v3.VSelect(
+                v_model=("preset", "coolwarm"),
+                items=("preset_items",),
+                item_title="title",
+                item_value="value",
+                label="Colour map",
+                style="max-width: 150px",
+                classes="mx-1 js-preset",
+                **_SELECT_BASE,
+            )
+            # 0 (or blank) = smooth; >0 bands the map into that many colours.
+            v3.VTextField(
+                v_model_number=("n_colors", 0),
+                label="Bands",
+                type="number",
+                min=0,
+                max=256,
+                style="max-width: 105px",
+                classes="mx-1 js-bands",
+                **_FIELD,
+            )
+            v3.VBtn(
+                "Rescale",
+                prepend_icon="mdi-arrow-expand-horizontal",
+                size="small",
+                variant="tonal",
+                classes="mx-1",
+                click=self.ctrl.rescale,
+            )
+            # Less-used colour controls in a popover (range mode, manual min/max,
+            # true cell values). Nested VMenu with activator="parent" anchors it
+            # to the button.
+            with v3.VBtn("Options", prepend_icon="mdi-tune", size="small",
+                         variant="text", classes="mx-1"):
+                with v3.VMenu(activator="parent", location="bottom start",
+                              close_on_content_click=False):
+                    with v3.VCard(classes="pa-3", min_width="260"):
+                        with v3.VRow(classes="mx-0 align-center"):
+                            v3.VSwitch(
+                                v_model=("auto_range", True), label="Auto range",
+                                density="compact", hide_details=True,
+                                color="primary", classes="mr-3",
+                            )
+                            v3.VSwitch(
+                                v_model=("robust_range", False), label="1-99%",
+                                density="compact", hide_details=True, color="primary",
+                            )
+                        _switch("use_cell_data", "True cell values")
+                        with html.Div(classes="d-flex mt-3", style="gap: 8px"):
+                            v3.VTextField(v_model_number=("range_min", 0.0),
+                                          label="Min", type="number", **_FIELD)
+                            v3.VTextField(v_model_number=("range_max", 1.0),
+                                          label="Max", type="number", **_FIELD)
 
             v3.VSpacer()
 
@@ -1064,10 +1136,12 @@ class FoamViz:
                 classes="text-caption text-medium-emphasis mb-2 px-1",
             )
 
-            # Colouring applies to everything, so it stays permanently visible.
-            self._section_colour()
+            # Tool selector: a vertical stack of the tools, each with its own
+            # "Show" eye toggle so an actor can be turned on/off without opening
+            # its settings.
+            self._tool_stack()
 
-            # One tool's controls at a time, chosen by the toolbar selector. The
+            # One tool's settings at a time, chosen by the stack above. The
             # panels are only hidden (v-show), not unmounted, so their state and
             # their representations survive a tool switch.
             builders = {
@@ -1082,101 +1156,54 @@ class FoamViz:
                 with html.Div(v_show=(f"active_tool === '{key}'",)):
                     builders[key](title, icon)
 
+            # Scene lighting lives at the bottom of the pane (global, mostly
+            # fine-tuning), collapsed by default.
+            self._section_lighting()
+
+    def _tool_stack(self):
+        """Vertical tool buttons; each row selects the tool's settings (left)
+        and toggles its actor's visibility (the eye, right)."""
+        with html.Div(classes="foamviz-toolstack"):
+            for key, title, icon in TOOLS:
+                vis = TOOL_VISIBLE[key]
+                with html.Div(classes="foamviz-tool-row"):
+                    v3.VBtn(
+                        title,
+                        prepend_icon=icon,
+                        size="small",
+                        variant="text",
+                        active=(f"active_tool === '{key}'",),
+                        color=(f"active_tool === '{key}' ? 'primary' : ''",),
+                        click=f"active_tool = '{key}'",
+                        classes=f"foamviz-tool-btn js-tool-{key}",
+                    )
+                    v3.VBtn(
+                        icon=(f"{vis} ? 'mdi-eye' : 'mdi-eye-off'",),
+                        size="small",
+                        variant="text",
+                        density="comfortable",
+                        color=(f"{vis} ? 'primary' : ''",),
+                        click=f"{vis} = !{vis}",
+                        classes=f"foamviz-eye js-show-{key}",
+                    )
+
     # -- drawer sections --------------------------------------------------
 
-    def _section_colour(self):
-        with _section("Colour", "mdi-palette"):
-            # The `js-*` classes are stable hooks for tests/browser_check.py;
-            # Vuetify's own markup offers nothing reliable to select on.
-            v3.VSelect(
-                v_model=("color_field", None),
-                items=("field_items",),
-                label="Field",
-                classes="mb-3 js-color-field",
-                **_SELECT_BASE,
-            )
-            v3.VSelect(
-                v_model=("color_component", "magnitude"),
-                items=("components", COMPONENTS),
-                item_title="title",
-                item_value="value",
-                label="Component",
-                disabled=("!component_enabled",),
-                classes="mb-3 js-color-component",
-                **_SELECT_BASE,
-            )
-            v3.VSelect(
-                v_model=("preset", "coolwarm"),
-                items=("preset_items",),
-                item_title="title",
-                item_value="value",
-                label="Colour map",
-                classes="mb-3 js-preset",
-                **_SELECT_BASE,
-            )
-            with v3.VRow(classes="mt-1 mx-0 align-center"):
-                v3.VSwitch(
-                    v_model=("auto_range", True),
-                    label="Auto range",
-                    density="compact",
-                    hide_details=True,
-                    color="primary",
-                    classes="mr-3",
-                )
-                v3.VSwitch(
-                    v_model=("robust_range", False),
-                    label="1-99%",
-                    density="compact",
-                    hide_details=True,
-                    color="primary",
-                )
-            _switch("use_cell_data", "True cell values")
-            with html.Div(classes="d-flex mt-3", style="gap: 8px"):
-                v3.VTextField(
-                    v_model_number=("range_min", 0.0),
-                    label="Min",
-                    type="number",
-                    **_FIELD,
-                )
-                v3.VTextField(
-                    v_model_number=("range_max", 1.0),
-                    label="Max",
-                    type="number",
-                    **_FIELD,
-                )
-            # 0 (or blank) = smooth; >0 bands the map into that many colours.
-            v3.VTextField(
-                v_model_number=("n_colors", 0),
-                label="Bands (0 = smooth)",
-                type="number",
-                min=0,
-                max=256,
-                classes="mt-3 js-bands",
-                **_FIELD,
-            )
-            v3.VBtn(
-                "Rescale to data",
-                block=True,
-                variant="tonal",
-                size="small",
-                classes="mt-2",
-                prepend_icon="mdi-arrow-expand-horizontal",
-                click=self.ctrl.rescale,
-            )
-            # Scene lighting, in a collapsible panel (hidden by default — mostly
-            # fine-tuning / dev). The base rig does the heavy lifting: the light
-            # kit (toggle), an ambient floor that lifts faces angled away from
-            # the lights, and diffuse for directional shading. Settings persist
-            # globally (see _save_settings).
-            with v3.VExpansionPanels(variant="accordion", flat=True, classes="mt-3"):
-                with v3.VExpansionPanel():
-                    with v3.VExpansionPanelTitle(classes="text-caption pa-2"):
-                        v3.VIcon("mdi-lightbulb-on-outline", size="small", classes="mr-2")
-                        html.Span("Lighting")
-                    with v3.VExpansionPanelText():
-                        _switch("light_kit", "Light kit")
-                        _slider("light_ambient", "Ambient", 0.0, 1.0, 0.05)
-                        _slider("light_diffuse", "Diffuse", 0.0, 1.0, 0.05)
+    def _section_lighting(self):
+        # Scene lighting, in a collapsible panel at the bottom of the pane (mostly
+        # fine-tuning / dev). The base rig does the heavy lifting: the light kit
+        # (toggle), an ambient floor that lifts faces angled away from the lights,
+        # and diffuse for directional shading. Settings persist globally (see
+        # _save_settings).
+        with v3.VExpansionPanels(variant="accordion", flat=True, classes="mt-3"):
+            with v3.VExpansionPanel():
+                with v3.VExpansionPanelTitle(classes="text-caption pa-2"):
+                    v3.VIcon("mdi-lightbulb-on-outline", size="small", classes="mr-2")
+                    html.Span("Lighting")
+                with v3.VExpansionPanelText():
+                    _switch("light_kit", "Light kit")
+                    _slider("light_ambient", "Ambient", 0.0, 1.0, 0.05)
+                    _slider("light_diffuse", "Diffuse", 0.0, 1.0, 0.05)
 
     def _tool_cutplane(self, title, icon):
         """Cut plane + slice: the plane is the hub the slice, stream seeds and
@@ -1235,7 +1262,6 @@ class FoamViz:
                 click=self.ctrl.plane_apply,
             )
             v3.VDivider(classes="my-3")
-            _switch("slice_visible", "Show slice")
             # With the mesh on, the slice becomes a crinkle slice: whole cells
             # the plane passes through, i.e. the true mesh, not a flat cut.
             _switch("slice_edges", "Mesh (crinkle)")
@@ -1243,7 +1269,6 @@ class FoamViz:
     def _tool_boundary(self, title, icon):
         """Room shell (the boundary surface) + which patches are read."""
         with _section(title, icon):
-            _switch("surface_visible", "Show boundary patches")
             _switch("surface_colored", "Colour by field")
             _switch("surface_cull", "Cull near walls")
             _switch("surface_clip", "Cut away at plane")
@@ -1262,13 +1287,11 @@ class FoamViz:
 
     def _tool_contour(self, title, icon):
         with _section(title, icon):
-            _switch("contour_visible", "Show isosurfaces")
             _slider("contour_count", "Count", 1, 12, 1, debounce=True)
             _slider("contour_opacity", "Opacity", 0.05, 1.0, 0.05)
 
     def _tool_stream(self, title, icon):
         with _section(title, icon):
-            _switch("stream_visible", "Show streamlines")
             v3.VSelect(
                 v_model=("vector_field", None),
                 items=("vector_items",),
@@ -1281,7 +1304,6 @@ class FoamViz:
 
     def _tool_glyph(self, title, icon):
         with _section(title, icon):
-            _switch("glyph_visible", "Show arrows")
             with v3.VBtnToggle(
                 v_model=("glyph_source", "slice"),
                 mandatory=True,
@@ -1304,7 +1326,6 @@ class FoamViz:
                 v_if="!has_geometry",
                 classes="text-caption text-medium-emphasis mb-2",
             )
-            _switch("geometry_visible", "Show geometry")
             with v3.VBtnToggle(
                 v_model=("geometry_mode", "features"),
                 mandatory=True,
@@ -1614,4 +1635,11 @@ _CSS = """
   border-top: 1px solid rgba(var(--v-theme-on-surface), .09);
 }
 .foamviz-section-body { padding: 2px 4px 6px; }
+
+/* Tool selector stack: each row is a tool button (fills the row, selects its
+   settings) plus an eye toggle (its actor's visibility). */
+.foamviz-toolstack { display: flex; flex-direction: column; gap: 2px; margin: 6px 4px 4px; }
+.foamviz-tool-row { display: flex; align-items: center; gap: 2px; }
+.foamviz-tool-btn { flex: 1 1 auto; justify-content: flex-start; text-transform: none; }
+.foamviz-eye { flex: 0 0 auto; }
 """

@@ -92,10 +92,10 @@ def main():
                 print(f"  -> {out / f'{name}.png'}")
 
             def tool(title):
-                """Select a widget tool from the top-bar selector, revealing its
-                controls in the drawer. Idempotent: the selector is a mandatory
-                toggle, so re-clicking the active tool is a no-op. Colouring is
-                always visible and needs no tool.
+                """Select a widget tool from the side-pane tool stack, revealing
+                its settings below. Re-clicking the active tool is harmless.
+                Visibility is a separate eye toggle (.js-show-<key>); colouring
+                lives in the top bar and needs no tool.
                 """
                 page.get_by_role("button", name=title, exact=True).click()
                 page.wait_for_timeout(500)
@@ -108,7 +108,7 @@ def main():
 
                 # 2. streamlines
                 tool("Streamlines")
-                page.get_by_label("Show streamlines").check()
+                page.locator(".js-show-stream").click()
                 page.wait_for_timeout(5000)
                 wait_for_render(page, "streamlines")
                 shot("02-streamlines")
@@ -131,13 +131,13 @@ def main():
 
                 # 4. vector arrows on the cut plane
                 tool("Arrows")
-                page.get_by_label("Show arrows").check()
+                page.locator(".js-show-glyph").click()
                 page.wait_for_timeout(3500)
                 shot("04-arrows")
 
                 # 5. isosurfaces
                 tool("Isosurfaces")
-                page.get_by_label("Show isosurfaces").check()
+                page.locator(".js-show-contour").click()
                 page.wait_for_timeout(3500)
                 shot("05-isosurfaces")
 
