@@ -136,6 +136,15 @@ assertions need updating — the checks are deliberately concrete.
     fine on a *deliberate* action (a view button); doing it on every mouse-up is
     not. The server camera already tracks the client in local mode, so it gained
     nothing.
+  - **Turntable vs trackball rotation is a client (vtk.js) interactor setting,
+    not a server `vtkInteractorStyle`** (which does nothing in local mode). The
+    local view's reactive `interactor_settings` prop is bound to a state var; the
+    button-1 `Rotate` manipulator gets `useWorldUpVec: True, worldUpVec: [0,0,1]`
+    for turntable (keeps world +Z up — the default, good for buildings) or plain
+    `Rotate` for free trackball. `_INTERACTOR_TURNTABLE` / `_INTERACTOR_TRACKBALL`;
+    the `turntable` state var toggles them (`_on_turntable`), from the icon
+    toggle in the bottom bar. vtk.js has no prebuilt "Turntable" style — this
+    manipulator flag is the mechanism.
 - **Keyboard shortcuts are extensible via `KEY_SHORTCUTS`** (`app.py`): a pressed
   `event.key` → a CSS selector, and one injected `window` keydown listener
   (`client.Script`, `_KEY_JS_TEMPLATE`) clicks the matched element. So a shortcut
