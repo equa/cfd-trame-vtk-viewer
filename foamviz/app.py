@@ -1170,7 +1170,6 @@ class FoamViz:
                     v3.VBtn(
                         title,
                         prepend_icon=icon,
-                        size="small",
                         variant="text",
                         active=(f"active_tool === '{key}'",),
                         color=(f"active_tool === '{key}' ? 'primary' : ''",),
@@ -1630,7 +1629,7 @@ _CSS = """
 .foamviz-section { margin: 10px 6px; }
 .foamviz-section-head {
   display: flex; align-items: center; padding: 10px 4px 6px;
-  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  font-size: 0.875rem; font-weight: 600; letter-spacing: .02em;
   color: rgb(var(--v-theme-on-surface));
   border-top: 1px solid rgba(var(--v-theme-on-surface), .09);
 }
