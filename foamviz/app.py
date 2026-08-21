@@ -85,25 +85,15 @@ TOOL_VISIBLE = {
     "glyph": "glyph_visible",
     "geometry": "geometry_visible",
 }
-
-# vtk.js local-view mouse mappings. The base (pan/zoom/roll) is trame's default;
-# only the button-1 Rotate manipulator differs between the two rotation modes:
-#   turntable — rotation constrained to keep world +Z up (useWorldUpVec), which
-#               reads naturally for buildings; the default here.
-#   trackball — vtk.js's free rotation (can tumble/roll to any orientation).
-_INTERACTOR_BASE = [
-    {"button": 2, "action": "Pan"},
-    {"button": 3, "action": "Zoom", "scrollEnabled": True},
-    {"button": 1, "action": "Pan", "alt": True},
-    {"button": 1, "action": "Zoom", "control": True},
-    {"button": 1, "action": "Select", "shift": True},
-    {"button": 1, "action": "Roll", "alt": True, "shift": True},
-]
-_INTERACTOR_TRACKBALL = [{"button": 1, "action": "Rotate"}, *_INTERACTOR_BASE]
-_INTERACTOR_TURNTABLE = [
-    {"button": 1, "action": "Rotate", "useWorldUpVec": True, "worldUpVec": [0, 0, 1]},
-    *_INTERACTOR_BASE,
-]
+# NOTE: turntable rotation (keep world +Z up) is NOT available with trame-vtk
+# 2.11.15 in local mode. vtk.js's rotate manipulator supports it via
+# `useWorldUpVec`/`worldUpVec`, but trame's interactor_settings applier (client
+# `Md()`) forwards only button/shift/control/alt/scrollEnabled/dragEnabled and
+# drops those keys, and the interactor/style helper is closure-captured on the
+# client (not exposed for js_call, not global) so it can't be patched either.
+# Re-enable only after a trame-vtk that forwards manipulator props (then bind the
+# local view's `interactor_settings` to a state var with a Rotate entry carrying
+# `useWorldUpVec: True, worldUpVec: [0,0,1]`). See CLAUDE.md "Trame traps".
 
 # Keyboard shortcuts, extensibly: a pressed key (event.key) -> a CSS selector to
 # click. Reusable for any button-backed action -- add a row here and give the
@@ -226,11 +216,6 @@ class FoamViz:
                 "busy": False,
                 # which widget tool's controls the drawer is showing (see TOOLS)
                 "active_tool": "cutplane",
-                # Mouse rotation: turntable (Z up) by default for buildings,
-                # toggleable to free trackball. interactor_settings is bound to
-                # the local view and re-applied when `turntable` flips.
-                "turntable": True,
-                "interactor_settings": _INTERACTOR_TURNTABLE,
                 # UI theme, driven by the embedding app via ?theme=light|dark.
                 # Bound to the layout's <VApp :theme>, so it switches at runtime.
                 "ui_theme": "dark",
@@ -776,14 +761,6 @@ class FoamViz:
         self._apply_lighting()
         self.ctrl.view_update()
         self._save_settings()
-
-    @change("turntable")
-    def _on_turntable(self, turntable, **_):
-        # Swap the bound interactor mapping; the local view re-applies it on the
-        # client (local vtk.js mode owns interaction).
-        self.state.interactor_settings = (
-            _INTERACTOR_TURNTABLE if turntable else _INTERACTOR_TRACKBALL
-        )
 
     # ------------------------------------------------------------ controller
 
@@ -1380,9 +1357,6 @@ class FoamViz:
                     namespace="view",
                     mode="local",
                     interactive_ratio=1,
-                    # Turntable vs trackball mouse rotation; re-applies when the
-                    # bound state var changes (see _on_turntable).
-                    interactor_settings=("interactor_settings",),
                 )
                 self.ctrl.view_update = view.update
                 self.ctrl.view_reset_camera = view.reset_camera
@@ -1422,21 +1396,6 @@ class FoamViz:
                     min_width="0",
                     click=(self.ctrl.set_view, f"['{direction}']"),
                 )
-            # Rotation mode: turntable (keeps Z up) vs free trackball. Icon-only
-            # toggle, tooltip via title; sits with the camera presets.
-            v3.VBtn(
-                icon=("turntable ? 'mdi-axis-z-rotate-clockwise' : 'mdi-rotate-orbit'",),
-                variant="text",
-                density="comfortable",
-                active=("turntable",),
-                color=("turntable ? 'primary' : ''",),
-                click="turntable = !turntable",
-                classes="ml-1 js-turntable",
-                title=(
-                    "turntable ? 'Turntable rotation (Z up) — click for free trackball'"
-                    " : 'Free trackball rotation — click for turntable (Z up)'",
-                ),
-            )
             v3.VDivider(vertical=True, classes="mx-2")
             v3.VBtn(
                 icon=("playing ? 'mdi-pause' : 'mdi-play'",),

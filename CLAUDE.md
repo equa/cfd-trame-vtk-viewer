@@ -136,15 +136,19 @@ assertions need updating — the checks are deliberately concrete.
     fine on a *deliberate* action (a view button); doing it on every mouse-up is
     not. The server camera already tracks the client in local mode, so it gained
     nothing.
-  - **Turntable vs trackball rotation is a client (vtk.js) interactor setting,
-    not a server `vtkInteractorStyle`** (which does nothing in local mode). The
-    local view's reactive `interactor_settings` prop is bound to a state var; the
-    button-1 `Rotate` manipulator gets `useWorldUpVec: True, worldUpVec: [0,0,1]`
-    for turntable (keeps world +Z up — the default, good for buildings) or plain
-    `Rotate` for free trackball. `_INTERACTOR_TURNTABLE` / `_INTERACTOR_TRACKBALL`;
-    the `turntable` state var toggles them (`_on_turntable`), from the icon
-    toggle in the bottom bar. vtk.js has no prebuilt "Turntable" style — this
-    manipulator flag is the mechanism.
+  - **Turntable rotation is NOT available with trame-vtk 2.11.15 (local mode).**
+    Rotation is a client (vtk.js) interactor setting, not a server
+    `vtkInteractorStyle` (which does nothing in local mode). vtk.js's rotate
+    manipulator *does* support turntable via `useWorldUpVec`/`worldUpVec`, but:
+    (1) trame's `interactor_settings` applier (client `Md()`) forwards only
+    `button/shift/control/alt/scrollEnabled/dragEnabled` and **drops** those
+    keys; (2) the interactor/style helper is closure-captured on the client (no
+    `expose()`, not global) so it can't be patched from injected JS or `js_call`.
+    Tried the reactive-prop path (a `turntable` toggle) — the toggle changed the
+    prop but the flag never reached the manipulator, so it did nothing; reverted
+    2026-08-21. Re-enable once a trame-vtk forwards manipulator props: bind the
+    local view's `interactor_settings` to a state var whose Rotate entry carries
+    `useWorldUpVec: True, worldUpVec: [0,0,1]`.
 - **Keyboard shortcuts are extensible via `KEY_SHORTCUTS`** (`app.py`): a pressed
   `event.key` → a CSS selector, and one injected `window` keydown listener
   (`client.Script`, `_KEY_JS_TEMPLATE`) clicks the matched element. So a shortcut
