@@ -58,8 +58,12 @@ def main():
     check("excludes T.orig", "T.orig" not in case.fields)
 
     print("\nfield ranges")
+    # T is converted kelvin -> celsius at read time (300 K -> 26.85 C).
     tlo, thi = case.field_range("T", "magnitude")
-    check("T spans the hot patch", tlo == 300.0 and thi > 550, f"{tlo:.1f}..{thi:.1f}")
+    check("T spans the hot patch (celsius)", abs(tlo - 26.85) < 0.1 and thi > 280,
+          f"{tlo:.1f}..{thi:.1f}")
+    check("noise fields skipped at the reader",
+          not ({"p", "alphat", "rho"} & set(case.fields)), str(sorted(case.fields)))
     rlo, rhi = case.field_range("T", "magnitude", robust=True)
     check("percentile range is tighter", rhi < thi, f"{rlo:.2f}..{rhi:.2f}")
     ulo, uhi = case.field_range("U", "magnitude")
@@ -176,7 +180,11 @@ def main():
     check("0 bands is the smooth 256-node map", pipe.lut.GetSize() == 256,
           f"{pipe.lut.GetSize()} nodes")
 
-    pipe.update_contour(True, 4, 0.4)
+    # Isovalues must fall inside the baked field's actual range (U magnitude),
+    # not the arbitrary display range set above, or the contour is empty.
+    lo, hi = case.internal.GetPointData().GetArray(COLOR_ARRAY).GetRange()
+    isovals = [lo + (hi - lo) * f for f in (0.25, 0.5, 0.75)]
+    pipe.update_contour(True, isovals, 0.4)
     pipe.contour.Update()
     check("isosurfaces have polygons", pipe.contour.GetOutput().GetNumberOfCells() > 0,
           f"{pipe.contour.GetOutput().GetNumberOfCells()} cells")
@@ -189,11 +197,17 @@ def main():
     check("tubes are generated", pipe.stream_tube.GetOutput().GetNumberOfPoints() > 0)
 
     for scale_by in (False, True):
-        pipe.update_glyphs(True, "slice", 200, 1.0, scale_by)
+        pipe.update_glyphs(True, "slice", 200, 1.0, scale_by, "z", 0.0)
         pipe.glyph.Update()
-        check(f"glyphs build (scale_by_magnitude={scale_by})",
+        check(f"plane glyphs build (scale_by_magnitude={scale_by})",
               pipe.glyph.GetOutput().GetNumberOfPoints() > 0,
               f"{pipe.glyph.GetOutput().GetNumberOfPoints()} pts")
+    # isosurface source seeds off the contour output (set above)
+    pipe.update_glyphs(True, "isosurface", 200, 1.0, False, "z", 0.0)
+    pipe.glyph.Update()
+    check("isosurface glyphs build",
+          pipe.glyph.GetOutput().GetNumberOfPoints() > 0,
+          f"{pipe.glyph.GetOutput().GetNumberOfPoints()} pts")
 
     print("\ncentre-of-rotation pick (F-key focus)")
     pipe.set_view("iso")

@@ -185,9 +185,27 @@ class FoamPipeline:
         self.stream_mapper.SetInputConnection(self.stream_tube.GetOutputPort())
 
         # --- vector glyphs --------------------------------------------------
+        # Two seed sources:
+        #  * "On plane" — a REGULAR grid over the cut plane, sampled from the
+        #    volume with a probe, so arrows are evenly spaced regardless of mesh
+        #    density (mask-points on the cut faces clumps where the mesh is fine).
+        #    Grid points outside the mesh come back invalid; drop them so uniform-
+        #    length arrows don't sprout in empty space.
+        #  * "On isosurface" — points sampled off the isosurface polydata.
+        self.glyph_plane = vtk.vtkPlaneSource()
+        self.glyph_probe = vtk.vtkProbeFilter()
+        self.glyph_probe.SetInputConnection(self.glyph_plane.GetOutputPort())
+        self.glyph_grid = vtk.vtkThresholdPoints()
+        self.glyph_grid.SetInputConnection(self.glyph_probe.GetOutputPort())
+        self.glyph_grid.SetInputArrayToProcess(
+            0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, "vtkValidPointMask"
+        )
+        self.glyph_grid.ThresholdByUpper(1.0)
+
         self.glyph_seeds = vtk.vtkMaskPoints()
         self.glyph_seeds.RandomModeOn()
         self.glyph_seeds.SetRandomModeType(1)
+        self.glyph_seeds.SetInputConnection(self.contour_normals.GetOutputPort())
 
         # Keep an explicit reference to the arrow: handing VTK a temporary
         # (`SetSourceConnection(vtkArrowSource().GetOutputPort())`) lets Python
@@ -198,7 +216,7 @@ class FoamPipeline:
 
         self.glyph = vtk.vtkGlyph3D()
         self.glyph.SetSourceConnection(self.glyph_source.GetOutputPort())
-        self.glyph.SetInputConnection(self.glyph_seeds.GetOutputPort())
+        self.glyph.SetInputConnection(self.glyph_grid.GetOutputPort())
         self.glyph.SetVectorModeToUseVector()
         self.glyph.SetScaleModeToScaleByVector()
         self.glyph.SetColorModeToColorByScalar()
@@ -399,6 +417,7 @@ class FoamPipeline:
         self.crinkle.SetInputData(case.internal)
         self.contour.SetInputData(case.internal)
         self.tracer.SetInputData(case.internal)
+        self.glyph_probe.SetSourceData(case.internal)
         self._place_triad()
 
     def apply_color_array(self):
@@ -591,18 +610,18 @@ class FoamPipeline:
         prop.SetEdgeColor(0.2, 0.2, 0.24)
         prop.SetLineWidth(1)
 
-    def update_contour(self, visible, n_values, opacity):
+    def update_contour(self, visible, values, opacity):
+        """Draw isosurfaces at the explicit ``values`` (a list of isovalues).
+        The caller derives them from the surface count and the value/range UI."""
         self.contour_actor.SetVisibility(1 if visible else 0)
         self.contour_actor.GetProperty().SetOpacity(opacity)
-        if not visible:
-            return
-        lo, hi = self.color_range
-        # Interior values only: an isosurface exactly at the data extreme is
-        # either empty or coincident with the boundary.
-        self.contour.SetNumberOfContours(n_values)
-        for i in range(n_values):
-            f = (i + 1) / (n_values + 1)
-            self.contour.SetValue(i, lo + (hi - lo) * f)
+        # Always set the isovalues (not just when visible): the "On isosurface"
+        # glyph source reads the contour output even while the isosurface actor
+        # itself is hidden.
+        if values:
+            self.contour.SetNumberOfContours(len(values))
+            for i, v in enumerate(values):
+                self.contour.SetValue(i, float(v))
 
     def update_streamlines(self, visible, n_seeds, radius_scale, max_length):
         self.stream_actor.SetVisibility(1 if visible else 0)
@@ -614,15 +633,46 @@ class FoamPipeline:
         self.tracer.SetIntegrationStepUnit(vtk.vtkStreamTracer.CELL_LENGTH_UNIT)
         self.stream_tube.SetRadius(diagonal * 0.0015 * radius_scale)
 
-    def update_glyphs(self, visible, source, n_glyphs, scale, scale_by_magnitude):
+    def _configure_glyph_plane(self, axis, coord, n_glyphs):
+        """Lay a regular grid over the cut plane, spanning the domain bounds, with
+        ~``n_glyphs`` roughly-square cells, so the probed arrows are evenly spaced."""
+        b = self.case.bounds()
+        lo = (b[0], b[2], b[4])
+        hi = (b[1], b[3], b[5])
+        ai = "xyz".index(axis)
+        pos = self._clamp_to_axis(axis, coord)
+        others = [i for i in range(3) if i != ai]
+
+        def corner(u_hi, v_hi):
+            c = [0.0, 0.0, 0.0]
+            c[ai] = pos
+            c[others[0]] = hi[others[0]] if u_hi else lo[others[0]]
+            c[others[1]] = hi[others[1]] if v_hi else lo[others[1]]
+            return c
+
+        self.glyph_plane.SetOrigin(*corner(False, False))
+        self.glyph_plane.SetPoint1(*corner(True, False))
+        self.glyph_plane.SetPoint2(*corner(False, True))
+        # Split n_glyphs across the two in-plane extents so cells stay ~square.
+        lu = (hi[others[0]] - lo[others[0]]) or 1.0
+        lv = (hi[others[1]] - lo[others[1]]) or 1.0
+        n = max(int(n_glyphs), 1)
+        ru = max(1, round(np.sqrt(n * lu / lv)))
+        rv = max(1, round(n / ru))
+        self.glyph_plane.SetXResolution(ru)
+        self.glyph_plane.SetYResolution(rv)
+
+    def update_glyphs(self, visible, source, n_glyphs, scale, scale_by_magnitude,
+                      axis, coord):
         self.glyph_actor.SetVisibility(1 if visible else 0)
         if not visible:
             return
-        if source == "slice":
-            self.glyph_seeds.SetInputConnection(self.cutter.GetOutputPort())
-        else:
-            self.glyph_seeds.SetInputData(self.case.internal)
-        self.glyph_seeds.SetMaximumNumberOfPoints(n_glyphs)
+        if source == "isosurface":
+            self.glyph_seeds.SetMaximumNumberOfPoints(n_glyphs)
+            self.glyph.SetInputConnection(self.glyph_seeds.GetOutputPort())
+        else:  # "plane" — uniform grid over the cut plane
+            self._configure_glyph_plane(axis, coord, n_glyphs)
+            self.glyph.SetInputConnection(self.glyph_grid.GetOutputPort())
 
         # Room airflow spans orders of magnitude -- a plume core moving 100x
         # faster than the quiescent bulk. Scaling arrow length by speed makes

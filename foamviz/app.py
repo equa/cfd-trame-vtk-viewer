@@ -274,7 +274,13 @@ class FoamViz:
                 "slice_visible": True,
                 "slice_edges": False,
                 "contour_visible": False,
-                "contour_count": 4,
+                # 1 / 3 / 5 surfaces (odd, so one sits mid-range). One by default.
+                "contour_count": 1,
+                # Isovalue for a single surface; min/max span the values for 3/5.
+                # All three seed from the colour range (see _rescale).
+                "contour_value": 0.5,
+                "contour_min": 0.0,
+                "contour_max": 1.0,
                 # Nested translucent shells stack up fast, and the browser-side
                 # renderer blends them more aggressively than the server does.
                 "contour_opacity": 0.35,
@@ -448,7 +454,7 @@ class FoamViz:
             s.surface_cull,
         )
         p.update_slice(s.slice_visible, s.slice_edges)
-        p.update_contour(s.contour_visible, int(s.contour_count), float(s.contour_opacity))
+        p.update_contour(s.contour_visible, self._contour_values(), float(s.contour_opacity))
         p.update_streamlines(
             s.stream_visible,
             int(s.stream_seeds),
@@ -461,6 +467,8 @@ class FoamViz:
             int(s.glyph_count),
             float(s.glyph_scale),
             s.glyph_scale_by,
+            s.plane_axis,
+            coord,
         )
         p.update_geometry(
             s.geometry_visible,
@@ -500,6 +508,17 @@ class FoamViz:
         """The plane point's coordinate along the active normal axis."""
         return float(getattr(self.state, f"plane_{self.state.plane_axis}"))
 
+    def _contour_values(self):
+        """Isovalues for the current controls: the single value for one surface;
+        for 3/5, spread evenly *inside* [min, max] (interior fractions, so no
+        surface sits exactly on the range extreme where it tends to be empty)."""
+        s = self.state
+        n = int(s.contour_count)
+        if n <= 1:
+            return [float(s.contour_value)]
+        lo, hi = float(s.contour_min), float(s.contour_max)
+        return [lo + (hi - lo) * (i + 1) / (n + 1) for i in range(n)]
+
     def _reset_plane(self):
         """Centre the plane point in the domain. On case load the bounds -- hence
         the sensible default and the valid range -- change."""
@@ -533,6 +552,10 @@ class FoamViz:
         with self.state:
             self.state.range_min = round(lo, 6)
             self.state.range_max = round(hi, 6)
+            # Isosurface value/range default to (track) the colour range.
+            self.state.contour_min = round(lo, 6)
+            self.state.contour_max = round(hi, 6)
+            self.state.contour_value = round(lo + (hi - lo) / 2, 6)
 
     def _update_legend(self):
         lo, hi = self.pipeline.color_range
@@ -705,6 +728,9 @@ class FoamViz:
         "surface_clip",
         "contour_visible",
         "contour_count",
+        "contour_value",
+        "contour_min",
+        "contour_max",
         "stream_visible",
         "stream_seeds",
         "stream_length",
@@ -1295,7 +1321,20 @@ class FoamViz:
 
     def _tool_contour(self, title, icon):
         with _section(title, icon):
-            _slider("contour_count", "Count", 1, 12, 1, debounce=True)
+            # 1 / 3 / 5 surfaces (odd, max 5): a slider stepping by 2 from 1.
+            _slider("contour_count", "Surfaces", 1, 5, 2)
+            # One surface: a single isovalue. Several: the value range to spread
+            # them across. Both seed from the colour range (see _rescale).
+            with html.Div(v_if="contour_count === 1"):
+                v3.VTextField(
+                    v_model_number=("contour_value", 0.0), label="Value",
+                    type="number", classes="mt-1 js-contour-value", **_FIELD,
+                )
+            with html.Div(v_if="contour_count > 1", classes="d-flex mt-1", style="gap: 6px"):
+                v3.VTextField(v_model_number=("contour_min", 0.0), label="Min",
+                              type="number", classes="js-contour-min", **_FIELD)
+                v3.VTextField(v_model_number=("contour_max", 1.0), label="Max",
+                              type="number", classes="js-contour-max", **_FIELD)
             _slider("contour_opacity", "Opacity", 0.05, 1.0, 0.05)
 
     def _tool_stream(self, title, icon):
@@ -1321,7 +1360,7 @@ class FoamViz:
                 classes="mb-3",
             ):
                 v3.VBtn("On plane", value="slice", size="small")
-                v3.VBtn("In volume", value="volume", size="small")
+                v3.VBtn("On isosurface", value="isosurface", size="small")
             _switch("glyph_scale_by", "Length follows magnitude")
             _slider("glyph_count", "Count", 20, 3000, 20, debounce=True)
             _slider("glyph_scale", "Size", 0.1, 5.0, 0.1)
@@ -1496,7 +1535,7 @@ _FIELD = dict(
 )
 
 _FIELD_UNITS = {
-    "T": "[K]",
+    "T": "[°C]",
     "U": "[m/s]",
     "p": "[m²/s²]",
     "p_rgh": "[m²/s²]",
@@ -1536,7 +1575,6 @@ def _format_ticks(values):
 # runs once on release, not on every tick of a drag. Each gets a `<name>_draft`
 # mirror in the state; _sync_drafts() keeps it aligned on programmatic changes.
 _DEBOUNCED = (
-    "contour_count",
     "stream_seeds",
     "stream_length",
     "glyph_count",

@@ -12,12 +12,24 @@ from pathlib import Path
 
 import numpy as np
 import vtk
-from vtkmodules.util.numpy_support import vtk_to_numpy
+from vtkmodules.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 # The reader reports patches with a "patch/" or "group/" prefix. Groups overlap
 # with the individual patches they contain, so we only ever expose real patches.
 PATCH_PREFIX = "patch/"
 INTERNAL_MESH = "internalMesh"
+
+# Fields not worth reading for visualisation: pressure and turbulence-model
+# internals. Skipping them at the reader means they are never read from disk or
+# interpolated cell->point, which saves memory on large cases. Some (e.g.
+# epsilon) may be absent depending on the turbulence model — absent names are
+# simply ignored.
+SKIP_FIELDS = {"p", "alphat", "omega", "epsilon", "rho"}
+
+# Fields OpenFOAM stores in kelvin that we present in celsius (subtracted once at
+# read time, so every downstream range/legend/contour value is already °C).
+KELVIN_FIELDS = {"T"}
+CELSIUS_OFFSET = 273.15
 
 
 def find_cases(root):
@@ -88,6 +100,12 @@ class FoamCase:
         reader.SetSkipZeroTime(0)
         reader.UpdateInformation()    # discover the time steps and available arrays
         reader.EnableAllCellArrays()  # then enable everything that was discovered
+        # ...then turn the noise fields back off, so they are neither read nor
+        # interpolated cell->point (memory saving on big cases).
+        for i in range(reader.GetNumberOfCellArrays()):
+            name = reader.GetCellArrayName(i)
+            if name in SKIP_FIELDS:
+                reader.SetCellArrayStatus(name, 0)
         return reader
 
     def _make_reader(self):
@@ -205,8 +223,29 @@ class FoamCase:
                 self.boundary[name] = poly
             it.GoToNextItem()
 
+        self._to_celsius()
+
         if self.internal is not None:
             self.fields = self._describe_fields(self.internal)
+
+    def _to_celsius(self):
+        """Convert kelvin fields (T) to celsius, once per read. Replaces the
+        array with a converted copy rather than editing in place, so the reader's
+        own cache (shared by the shallow copies) is never mutated. One field-sized
+        copy per read — cheap next to the mesh."""
+        for ds in self.datasets():
+            for attr in (ds.GetPointData(), ds.GetCellData()):
+                for name in KELVIN_FIELDS:
+                    arr = attr.GetArray(name)
+                    if arr is None:
+                        continue
+                    celsius = vtk_to_numpy(arr) - CELSIUS_OFFSET
+                    new = numpy_to_vtk(
+                        np.ascontiguousarray(celsius, dtype=np.float64), deep=1
+                    )
+                    new.SetName(name)
+                    attr.RemoveArray(name)
+                    attr.AddArray(new)
 
     @staticmethod
     def _describe_fields(dataset):

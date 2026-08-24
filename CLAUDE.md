@@ -289,8 +289,31 @@ everything colours by. `app.py` is the Trame UI: state dict, change handlers,
 one `update_scene()` that pushes all state into the pipeline and redraws.
 `colors.py` samples matplotlib colour maps once and serves both the VTK
 transfer function and the HTML legend gradient, so they cannot drift apart.
-The cut plane is the hub — the slice, the stream-tracer seeds and the glyph
-seeds all derive from it.
+The cut plane is the hub — the slice and the stream-tracer seeds derive from it
+(the arrows have their own plane grid, see below).
+
+## Fields, isosurfaces, arrows (reworked 2026-08-24)
+
+- **Field loading is filtered at the reader** (`case.py`): `SKIP_FIELDS`
+  (`p`, `alphat`, `omega`, `epsilon`, `rho`) are disabled after
+  `EnableAllCellArrays()`, so they are never read or interpolated cell→point
+  (memory saving; absent ones are ignored). **Temperature is converted K→°C once
+  at read time** (`_to_celsius`, `KELVIN_FIELDS={"T"}`): replaces the `T` array
+  with a converted copy (not in place — the reader's cache is shared by the
+  shallow copies), so every downstream range/legend/contour value is already °C.
+  `_FIELD_UNITS["T"]` is `[°C]`.
+- **Isosurfaces**: count is 1/3/5 only (a slider stepping by 2 from 1; default
+  1). `_contour_values()` builds the isovalues — the single `contour_value` for
+  one surface, else interior fractions across `[contour_min, contour_max]`. All
+  three seed from (track) the colour range in `_rescale`. `update_contour` takes
+  an explicit values list and **always sets the isovalues** (even when the actor
+  is hidden) so the "On isosurface" arrow source can read the contour output.
+- **Arrows**: two seed sources. "On plane" lays a **regular grid over the cut
+  plane** (`vtkPlaneSource` → `vtkProbeFilter` on the volume → `vtkThresholdPoints`
+  on `vtkValidPointMask` to drop grid points outside the mesh) — evenly spaced,
+  unlike mask-points on the cut faces which clump where the mesh is fine. "On
+  isosurface" seeds off the contour output (mask-points). `update_glyphs` takes
+  the plane axis+coord to size the grid.
 
 ## Backend integration
 
