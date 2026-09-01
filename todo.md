@@ -23,6 +23,13 @@ before very long argument lists.
 
 ## Vector actor (Arrows)
 
+- Arrows must always orient by a selectable vector field (default U), independent
+  of the global colour selection. — **done** (3a316e5): added a Vector-field
+  selector to the arrows tool (shares `vector_field` with streamlines). Root
+  cause of "invisible unless U is the colour field": "Length follows magnitude"
+  normalised by the colour range, so colouring by a big scalar (T) shrank arrows
+  ~30x — now normalised by the vector's own magnitude.
+
 - Extra: Replace "In volume" option with "On isosurface"
   — **done**. "On isosurface" seeds arrows off the isosurface (contour output)
     works even when the isosurface actor itself is hidden.
