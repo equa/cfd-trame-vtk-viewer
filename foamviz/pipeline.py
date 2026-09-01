@@ -710,9 +710,13 @@ class FoamPipeline:
         # faster than the quiescent bulk. Scaling arrow length by speed makes
         # everything outside the plume vanish, so uniform-length arrows (which
         # still carry speed in their colour) are the more readable default.
-        if scale_by_magnitude:
+        if scale_by_magnitude and self.vector_field:
             self.glyph.SetScaleModeToScaleByVector()
-            reference = max(abs(self.color_range[1]), 1e-12)
+            # Normalise by the VECTOR field's own magnitude -- NOT the colour
+            # range: colouring by a large-range scalar (e.g. temperature) must not
+            # shrink the arrows to nothing.
+            _, vmax = self.case.field_range(self.vector_field, "magnitude")
+            reference = max(abs(vmax), 1e-12)
         else:
             self.glyph.SetScaleModeToDataScalingOff()
             reference = 1.0

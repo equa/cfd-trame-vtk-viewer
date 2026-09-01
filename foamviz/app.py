@@ -1406,6 +1406,14 @@ class FoamViz:
 
     def _tool_glyph(self, title, icon):
         with _section(title, icon):
+            # Arrows always orient by a vector field (default U), independent of
+            # the global colour field. Shares the selection with streamlines.
+            v3.VSelect(
+                v_model=("vector_field", None),
+                items=("vector_items",),
+                label="Vector field",
+                **_SELECT,
+            )
             with v3.VBtnToggle(
                 v_model=("glyph_source", "slice"),
                 mandatory=True,
