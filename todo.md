@@ -2,31 +2,90 @@
 
 Claude: You may edit this file. Short comments on progress like "done" or "refused" for example.
 
+Sometimes I (Niklas) want to extend on a topic that is marked as **done**. I will then keep
+the original and add a **new request**, that you (Claude) should change to **done** or just remove
+if we agree to discard the idea.
+
+## General
+
+When my requests require big changes, ask before. I might be asking for silly things.
+
+Always make sure to reuse existing functions, classes. I know how much easier it
+is to write a new function instead of searching for existing implementations.
+Better to generalize existing functions, as long as the argument list does not
+grow (too much).
+
+Prefer classes before passing arguments through several function calls and
+before very long argument lists.
+
+### Performance
+
+
 ## Vector actor (Arrows)
 
-- Make the glyph distribution uniform over the source plane
-  — **done**. "On plane" now lays a regular grid over the cut plane and probes
-  the volume (vtkPlaneSource → vtkProbeFilter → vtkThresholdPoints), so arrows
-  are evenly spaced regardless of mesh density. Count ≈ total grid points.
 - Extra: Replace "In volume" option with "On isosurface"
-  — **done**. "On isosurface" seeds arrows off the isosurface (contour output);
-  works even when the isosurface actor itself is hidden.
+  — **done**. "On isosurface" seeds arrows off the isosurface (contour output)
+    works even when the isosurface actor itself is hidden.
+  - **new request**. How is the seeding done over the iso-surface? Is it evenly
+    spaced just like for the cut plane arrow seeding? If not evenly distributed,
+    then please make it evenly distributed.
+    — **answer/discuss**: NOT as even as the plane. The plane uses a regular grid
+      (vtkPlaneSource→probe). The isosurface uses vtkMaskPoints, which random-
+      samples the surface's existing MESH VERTICES → density follows the
+      triangulation (finer mesh = more arrows), spread but not uniform. Truly
+      even is non-trivial: vtkPolyDataPointSampler only densifies (wrong way) and
+      interior-only sampling returned 0 pts; VTK has no clean "N even points on a
+      surface" filter. Options: (a) accept current; (b) MaskPoints
+      SPATIALLY_STRATIFIED mode (a bit more even); (c) a real surface resampler
+      (more code). Awaiting your pick before changing.
 
 ## Iso surfaces
 
-- Change default number of surfaces to 1 (slider). — **done**
-- The Count slider to only allow 1, 3 and 5 — **done** (slider min 1, max 5, step 2).
-- The default values calculated as presently — **done** (interior fractions across the range).
-- Add value input field and add a range input field, defaulting to the colour range
-  — **done**. Value field shown for 1 surface; Min/Max for 3/5. Both seed from
-  (track) the colour range on field change / rescale.
 
 ## Fields
 
-- Convert temperature field to Celsius — **done**. Converted K→°C once at read
-  time (cheap: one field-sized copy per read, not in place). Legend unit is [°C].
-- Skip loading p, alphat, omega, epsilon, rho — **done**. Disabled at the reader
-  (never read or interpolated); absent ones ignored.
+
+## Color map and color range options
+
+- Move the bands input into the options dialog — **done**
+- Move the Auto-range toggle to the top toolbar, just left of the Rescale button — **done**
+- Add an Apply button to the options dialog and defer all settings in the
+  options dialog til Apply is pressed. Currently, for non-small cases, things
+  stack up in a queue.
+  — **discuss (moderate code)**: reuses the existing draft/debounce pattern
+    (`_DEBOUNCED`/`*_draft`/`_sync_drafts`) — bind the dialog inputs to draft
+    vars, Apply commits them in one shot. ~1 small generalization + Apply buttons.
+    Recommend doing it (also covers the streamlines Apply). Awaiting go-ahead.
+- A very nice featyre of ParaView is color-map weigthed opacity. Is is this
+  available? If so, please add a toggle in the options. Linear only.
+  — **feasible, but risky**: same mechanism as ParaView
+    (vtkDiscretizableColorTransferFunction + a linear opacity vtkPiecewiseFunction,
+    EnableOpacityMappingOn). Moderate code in colors.py + a toggle. The unknown is
+    whether **vtk.js local mode honours surface opacity mapping** — needs a browser
+    spike before committing. Want me to try it?
+
+## Boundary
+
+- Default to full opacity 1 — **done** (surface_cull on keeps the interior visible)
+
+## Streamlines
+
+- Default to line representation, line width 1, (as opposed to Tubes). Toggle
+  for tubes (off by default). — **done**
+- Heavy operation, so needs an Apply button and defer streamline changes. There
+  is no need to remember un-applied changes.
+  — **discuss**: same Apply mechanism as the colour options above; "no need to
+    remember un-applied" makes it simpler (drafts reset to current on open). Ties
+    to the Apply-button decision.
+- **Discuss** Could it be a good idea to seed on isosurfaces? Seeding strls is a
+  general problem. Now cut plane is the seed base, which is pretty good, but
+  lacks precision.
+  — **discuss**: yes, plausible and not much new plumbing — the isosurface
+    (contour) output already exists and the glyphs already seed off it. A stream
+    "seed source" toggle (plane | isosurface) would reuse that. Precision-wise
+    it lets you seed exactly on a feature (e.g. a velocity isosurface). Worth a
+    small experiment if you want it.
+
 
 ## Camera and scene persistence
 
