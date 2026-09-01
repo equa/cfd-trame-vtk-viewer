@@ -51,18 +51,15 @@ before very long argument lists.
 - Move the Auto-range toggle to the top toolbar, just left of the Rescale button — **done**
 - Add an Apply button to the options dialog and defer all settings in the
   options dialog til Apply is pressed. Currently, for non-small cases, things
-  stack up in a queue.
-  — **discuss (moderate code)**: reuses the existing draft/debounce pattern
-    (`_DEBOUNCED`/`*_draft`/`_sync_drafts`) — bind the dialog inputs to draft
-    vars, Apply commits them in one shot. ~1 small generalization + Apply buttons.
-    Recommend doing it (also covers the streamlines Apply). Awaiting go-ahead.
+  stack up in a queue. — **done** (colour Options popover; drafts + Apply,
+    open-sync). Streamlines Apply done too.
 - A very nice featyre of ParaView is color-map weigthed opacity. Is is this
   available? If so, please add a toggle in the options. Linear only.
-  — **feasible, but risky**: same mechanism as ParaView
-    (vtkDiscretizableColorTransferFunction + a linear opacity vtkPiecewiseFunction,
-    EnableOpacityMappingOn). Moderate code in colors.py + a toggle. The unknown is
-    whether **vtk.js local mode honours surface opacity mapping** — needs a browser
-    spike before committing. Want me to try it?
+  — **done server-side, NEEDS BROWSER CHECK**: "Opacity by value (linear)" toggle
+    in the Options popover. LUT is now a discretizable CTF with a linear alpha
+    ramp. Verified the alpha ramps 0..1 on the server; UNKNOWN whether vtk.js
+    local mode renders per-scalar surface opacity. Please try it in the browser
+    and tell me if surfaces fade by value — if not, we drop/rework it.
 
 ## Boundary
 
@@ -73,10 +70,9 @@ before very long argument lists.
 - Default to line representation, line width 1, (as opposed to Tubes). Toggle
   for tubes (off by default). — **done**
 - Heavy operation, so needs an Apply button and defer streamline changes. There
-  is no need to remember un-applied changes.
-  — **discuss**: same Apply mechanism as the colour options above; "no need to
-    remember un-applied" makes it simpler (drafts reset to current on open). Ties
-    to the Apply-button decision.
+  is no need to remember un-applied changes. — **done** (Seeds/Tubes/width/length
+    defer to an Apply button; drafts refresh from current when the tool opens).
+    Vector field + the eye visibility stay live.
 - **Discuss** Could it be a good idea to seed on isosurfaces? Seeding strls is a
   general problem. Now cut plane is the seed base, which is pretty good, but
   lacks precision.
