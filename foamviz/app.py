@@ -238,6 +238,8 @@ class FoamViz:
                 "legend_title": "",
                 # 0 = smooth colour map; >0 bands it into that many colours.
                 "n_colors": 0,
+                # ParaView-style linear scalar-weighted opacity (LUT alpha ramp).
+                "opacity_map": False,
                 # Scene lighting: the light kit (multi-light rig) on/off, plus an
                 # ambient floor (no face goes fully black) and diffuse
                 # (directional shading) on the lit actors. Persisted globally.
@@ -450,6 +452,7 @@ class FoamViz:
                 pd.SetActiveVectors(s.vector_field)
 
         p.n_colors = int(s.n_colors or 0)
+        p.opacity_map = bool(s.opacity_map)
         p.set_preset(s.preset)
         p.set_color_range(float(s.range_min), float(s.range_max))
         self._apply_lighting()
@@ -1147,6 +1150,7 @@ class FoamViz:
                     with v3.VCard(classes="pa-3", min_width="260"):
                         _switch("robust_range", "Robust range (1-99%)", defer=True)
                         _switch("use_cell_data", "True cell values", defer=True)
+                        _switch("opacity_map", "Opacity by value (linear)", defer=True)
                         # 0 (or blank) = smooth; >0 bands the map into that many colours.
                         v3.VTextField(
                             v_model_number=("n_colors_draft", 0), label="Bands",
@@ -1636,7 +1640,8 @@ _DEBOUNCED = (
 # Drafts are synced from the real vars when the panel opens. Grouped vars carry
 # no @change handler -- Apply is their sole trigger.
 _APPLY_GROUPS = {
-    "coloropts": ("robust_range", "use_cell_data", "n_colors", "range_min", "range_max"),
+    "coloropts": ("robust_range", "use_cell_data", "opacity_map", "n_colors",
+                  "range_min", "range_max"),
     "stream": ("stream_seeds", "stream_length", "stream_tubes",
                "stream_radius", "stream_line_width"),
 }

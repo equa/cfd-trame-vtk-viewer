@@ -172,8 +172,11 @@ def main():
     pipe.set_color_range(0.0, 1.0)
     check("6 bands make 12 transfer-function nodes", pipe.lut.GetSize() == 12,
           f"{pipe.lut.GetSize()} nodes")
-    mid = tuple(round(v, 3) for v in pipe.lut.GetColor(0.10))
-    edge = tuple(round(v, 3) for v in pipe.lut.GetColor(0.15))
+    def _color(x):  # discretizable CTF needs the output-arg form of GetColor
+        c = [0.0, 0.0, 0.0]
+        pipe.lut.GetColor(x, c)
+        return tuple(round(v, 3) for v in c)
+    mid, edge = _color(0.10), _color(0.15)
     check("colour is flat within a band", mid == edge, f"{mid} vs {edge}")
     pipe.n_colors = 0
     pipe.set_color_range(0.0, 1.0)

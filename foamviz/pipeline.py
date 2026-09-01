@@ -87,7 +87,14 @@ class FoamPipeline:
         self.interactor.SetRenderWindow(self.render_window)
         self.interactor.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
 
-        self.lut = colors.color_transfer_function(self.preset, 0.0, 1.0)
+        # A discretizable transfer function (drop-in subclass) so it can carry a
+        # scalar-weighted opacity (ParaView-style). The RGB is still built by
+        # colors.color_transfer_function and DeepCopy'd in on every range change;
+        # the opacity ramp is re-applied afterwards (DeepCopy drops it).
+        self.lut = vtk.vtkDiscretizableColorTransferFunction()
+        self.lut.DeepCopy(colors.color_transfer_function(self.preset, 0.0, 1.0))
+        self.opacity_map = False           # linear scalar->alpha when True
+        self.opacity_pf = vtk.vtkPiecewiseFunction()
 
     def _build_filters(self):
         # --- boundary surface -------------------------------------------
@@ -511,6 +518,13 @@ class FoamPipeline:
         self.color_range = (vmin, vmax)
         new_lut = colors.color_transfer_function(self.preset, vmin, vmax, self.n_colors)
         self.lut.DeepCopy(new_lut)
+        # Re-apply the linear opacity ramp (DeepCopy drops it). Off => opaque.
+        self.opacity_pf.RemoveAllPoints()
+        self.opacity_pf.AddPoint(vmin, 0.0)
+        self.opacity_pf.AddPoint(vmax, 1.0)
+        self.lut.SetScalarOpacityFunction(self.opacity_pf)
+        self.lut.SetEnableOpacityMapping(bool(self.opacity_map))
+        self.lut.Build()
         for mapper in (
             self.surface_mapper,
             self.slice_mapper,
