@@ -189,8 +189,13 @@ class FoamPipeline:
         self.stream_tube.SetNumberOfSides(8)
         self.stream_tube.CappingOn()
 
-        self.stream_actor, self.stream_mapper = self._make_actor()
-        self.stream_mapper.SetInputConnection(self.stream_tube.GetOutputPort())
+        # Two actors, toggled by VISIBILITY -- never swap a mapper's input at
+        # runtime (that corrupts the vtk.js client, per the geometry-actor note).
+        # Lines read the tracer directly; tubes wrap it.
+        self.stream_line_actor, self.stream_line_mapper = self._make_actor()
+        self.stream_line_mapper.SetInputConnection(self.tracer.GetOutputPort())
+        self.stream_tube_actor, self.stream_tube_mapper = self._make_actor()
+        self.stream_tube_mapper.SetInputConnection(self.stream_tube.GetOutputPort())
 
         # --- vector glyphs --------------------------------------------------
         # Two seed sources:
@@ -270,7 +275,8 @@ class FoamPipeline:
             self.slice_actor,
             self.plane_outline_actor,
             self.contour_actor,
-            self.stream_actor,
+            self.stream_line_actor,
+            self.stream_tube_actor,
             self.glyph_actor,
             self.geometry_actor,
             *self.triad_actors,
@@ -502,7 +508,8 @@ class FoamPipeline:
         directional shading (diffuse). The slice is unlit (flat colour) and the
         outline/triad keep their own look, so they are left out."""
         for actor in (self.surface_actor, self.contour_actor,
-                      self.stream_actor, self.glyph_actor):
+                      self.stream_line_actor, self.stream_tube_actor,
+                      self.glyph_actor):
             prop = actor.GetProperty()
             prop.SetAmbient(ambient)
             prop.SetDiffuse(diffuse)
@@ -515,7 +522,8 @@ class FoamPipeline:
             self.surface_mapper,
             self.slice_mapper,
             self.contour_mapper,
-            self.stream_mapper,
+            self.stream_line_mapper,
+            self.stream_tube_mapper,
             self.glyph_mapper,
         ):
             mapper.SetScalarRange(vmin, vmax)
@@ -642,22 +650,20 @@ class FoamPipeline:
 
     def update_streamlines(self, visible, n_seeds, radius_scale, max_length,
                            tubes, line_width):
-        self.stream_actor.SetVisibility(1 if visible else 0)
+        # Show exactly one of the two actors (or neither) -- pure visibility, no
+        # mapper-input swap. In line mode the tube filter isn't pulled (lighter).
+        self.stream_line_actor.SetVisibility(1 if (visible and not tubes) else 0)
+        self.stream_tube_actor.SetVisibility(1 if (visible and tubes) else 0)
         if not visible:
             return
         self.stream_seeds.SetMaximumNumberOfPoints(n_seeds)
         diagonal = self.diagonal()
         self.tracer.SetMaximumPropagation(diagonal * max_length)
         self.tracer.SetIntegrationStepUnit(vtk.vtkStreamTracer.CELL_LENGTH_UNIT)
-        # Lines (fast, default) read the tracer directly; tubes wrap it (heavier).
-        # SetInputConnection to the same port is a no-op, so a non-tube toggle
-        # leaves this untouched (and the tube filter stays out of the pipeline).
         if tubes:
             self.stream_tube.SetRadius(diagonal * 0.0015 * radius_scale)
-            self.stream_mapper.SetInputConnection(self.stream_tube.GetOutputPort())
         else:
-            self.stream_mapper.SetInputConnection(self.tracer.GetOutputPort())
-            self.stream_actor.GetProperty().SetLineWidth(line_width)
+            self.stream_line_actor.GetProperty().SetLineWidth(line_width)
 
     def _configure_glyph_plane(self, axis, coord, n_glyphs):
         """Lay a regular grid over the cut plane, spanning the domain bounds, with

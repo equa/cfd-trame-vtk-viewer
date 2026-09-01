@@ -195,13 +195,19 @@ def main():
     check("streamlines integrate", lines > 20, f"{lines} lines")
     pipe.stream_tube.Update()
     check("tubes are generated", pipe.stream_tube.GetOutput().GetNumberOfPoints() > 0)
-    # line mode feeds the mapper the raw tracer lines (no tube), tube mode wraps
+    # line vs tube: two actors toggled by visibility (never swap a mapper input)
     pipe.update_streamlines(True, 80, 1.4, 4.0, tubes=False, line_width=1.0)
-    lines_src = pipe.stream_mapper.GetInputConnection(0, 0).GetProducer()
-    check("line mode maps the tracer directly", lines_src is pipe.tracer)
+    check("line mode shows only the line actor",
+          pipe.stream_line_actor.GetVisibility() == 1
+          and pipe.stream_tube_actor.GetVisibility() == 0)
     pipe.update_streamlines(True, 80, 1.4, 4.0, tubes=True, line_width=1.0)
-    tube_src = pipe.stream_mapper.GetInputConnection(0, 0).GetProducer()
-    check("tube mode maps the tube filter", tube_src is pipe.stream_tube)
+    check("tube mode shows only the tube actor",
+          pipe.stream_tube_actor.GetVisibility() == 1
+          and pipe.stream_line_actor.GetVisibility() == 0)
+    pipe.update_streamlines(False, 80, 1.4, 4.0, tubes=True, line_width=1.0)
+    check("both hidden when streamlines off",
+          pipe.stream_line_actor.GetVisibility() == 0
+          and pipe.stream_tube_actor.GetVisibility() == 0)
 
     for scale_by in (False, True):
         pipe.update_glyphs(True, "slice", 200, 1.0, scale_by, "z", 0.0)

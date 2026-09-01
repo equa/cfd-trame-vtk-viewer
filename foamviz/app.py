@@ -805,7 +805,11 @@ class FoamViz:
     @controller.set("apply_coloropts")
     def apply_coloropts(self):
         self._commit_group("coloropts")
-        self.state.n_colors = max(0, min(256, int(self.state.n_colors or 0)))
+        # Clamp bands to [0, 256] (the number field lets you type out of range);
+        # write it back to the draft too so the field shows the clamped value.
+        clamped = max(0, min(256, int(self.state.n_colors or 0)))
+        self.state.n_colors = clamped
+        self.state.n_colors_draft = clamped
         self._busy_call(self._do_apply_coloropts)
 
     def _do_apply_coloropts(self):
