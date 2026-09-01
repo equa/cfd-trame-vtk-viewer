@@ -34,12 +34,12 @@ def main():
     args = parser.parse_args()
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.WARNING,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     # Trame serves over aiohttp; surface its request/error logs too.
-    logging.getLogger("aiohttp.access").setLevel(logging.INFO)
-    logging.getLogger("aiohttp.server").setLevel(logging.INFO)
+    logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp.server").setLevel(logging.WARNING)
 
     cases = find_cases(args.data)
     if not cases:
