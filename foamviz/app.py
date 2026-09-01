@@ -216,6 +216,7 @@ class FoamViz:
                 "busy": False,
                 # which widget tool's controls the drawer is showing (see TOOLS)
                 "active_tool": "cutplane",
+                "opts_open": False,  # colour Options popover open-state (Apply sync)
                 # UI theme, driven by the embedding app via ?theme=light|dark.
                 # Bound to the layout's <VApp :theme>, so it switches at runtime.
                 "ui_theme": "dark",
@@ -311,10 +312,9 @@ class FoamViz:
                 "geometry_line_width": 2.0,
             }
         )
-        # Debounced sliders (see _slider(debounce=True)) bind their thumb to a
-        # `<name>_draft` mirror during the drag and only commit the real var on
-        # release, so their heavy change handler runs once, not every tick.
-        self.state.update({f"{n}_draft": getattr(self.state, n) for n in _DEBOUNCED})
+        # Drafted inputs (debounced sliders + Apply-deferred groups) bind to a
+        # `<name>_draft` mirror; init each from its real var.
+        self.state.update({f"{n}_draft": getattr(self.state, n) for n in _DRAFTED})
 
         # Restore globally-persisted preferences (lighting) over the defaults.
         saved = self._load_settings()
@@ -498,11 +498,22 @@ class FoamViz:
         self.ctrl.view_update()
 
     def _sync_drafts(self):
-        """Mirror each debounced slider's real var into its `<name>_draft`, so a
-        thumb bound to the draft follows programmatic changes (case load, and any
-        future reset) instead of snapping back to a stale drag value."""
-        for n in _DEBOUNCED:
+        """Mirror every drafted var's real value into its `<name>_draft`, so an
+        input bound to the draft follows programmatic changes (case load, reset)
+        instead of showing a stale value."""
+        for n in _DRAFTED:
             setattr(self.state, f"{n}_draft", getattr(self.state, n))
+
+    def _sync_group(self, group):
+        """Refresh one Apply-group's drafts from the real vars (on panel open)."""
+        for n in _APPLY_GROUPS[group]:
+            setattr(self.state, f"{n}_draft", getattr(self.state, n))
+
+    def _commit_group(self, group):
+        """Copy an Apply-group's drafts into the real vars. The vars carry no
+        @change handler, so this only stores them; the caller redraws once."""
+        for n in _APPLY_GROUPS[group]:
+            setattr(self.state, n, getattr(self.state, f"{n}_draft"))
 
     # -- cut plane: a world-coordinate point + a live position slider --------
     #
@@ -720,7 +731,7 @@ class FoamViz:
             return
         self.plane_apply()
 
-    @change("color_field", "color_component", "robust_range")
+    @change("color_field", "color_component")
     def _on_field(self, **_):
         if self._loading or self.case is None:
             return
@@ -745,9 +756,6 @@ class FoamViz:
         "contour_min",
         "contour_max",
         "stream_visible",
-        "stream_seeds",
-        "stream_length",
-        "stream_tubes",
         "vector_field",
         "glyph_visible",
         "glyph_source",
@@ -764,9 +772,6 @@ class FoamViz:
     # overlay (they finish in a frame).
     @change(
         "preset",
-        "range_min",
-        "range_max",
-        "use_cell_data",
         "surface_visible",
         "surface_colored",
         "surface_opacity",
@@ -774,8 +779,6 @@ class FoamViz:
         "surface_cull",
         "slice_visible",
         "contour_opacity",
-        "stream_radius",
-        "stream_line_width",
         "glyph_scale",
         "geometry_visible",
         "geometry_mode",
@@ -785,15 +788,35 @@ class FoamViz:
     def _on_cheap(self, **_):
         self.update_scene()
 
-    @change("n_colors")
-    def _on_n_colors(self, n_colors, **_):
-        # Clamp the colour-band count to [0, 256] — the number field lets you
-        # type out of range (negative, huge). Snap it back, then render.
-        clamped = max(0, min(256, int(n_colors or 0)))
-        if clamped != n_colors:
-            self.state.n_colors = clamped  # re-fires this handler with the clamped value
-            return
+    # -- Apply-deferred groups (colour options popover, streamlines tool). Their
+    # inputs edit drafts; these commit the group and redraw once. Grouped vars
+    # carry no @change handler, so nothing recomputes until Apply.
+
+    @change("opts_open")
+    def _on_opts_open(self, opts_open, **_):
+        if opts_open:  # popover just opened -> show the current values
+            self._sync_group("coloropts")
+
+    @change("active_tool")
+    def _on_tool_change(self, active_tool, **_):
+        if active_tool == "stream":  # streamlines panel selected -> refresh drafts
+            self._sync_group("stream")
+
+    @controller.set("apply_coloropts")
+    def apply_coloropts(self):
+        self._commit_group("coloropts")
+        self.state.n_colors = max(0, min(256, int(self.state.n_colors or 0)))
+        self._busy_call(self._do_apply_coloropts)
+
+    def _do_apply_coloropts(self):
+        if self.state.auto_range:
+            self._rescale()  # honour a robust_range change
         self.update_scene()
+
+    @controller.set("apply_stream")
+    def apply_stream(self):
+        self._commit_group("stream")
+        self._busy_call(self.update_scene)
 
     @change("light_kit", "light_ambient", "light_diffuse")
     def _on_lighting(self, **_):
@@ -1116,25 +1139,30 @@ class FoamViz:
             # to the button.
             with v3.VBtn("Options", prepend_icon="mdi-tune", size="small",
                          variant="text", classes="mx-1"):
+                # Deferred: inputs edit *_draft; Apply commits them in one recompute
+                # (heavy cases otherwise queued a redraw per keystroke/toggle).
                 with v3.VMenu(activator="parent", location="bottom start",
-                              close_on_content_click=False):
+                              close_on_content_click=False,
+                              v_model=("opts_open", False)):
                     with v3.VCard(classes="pa-3", min_width="260"):
-                        v3.VSwitch(
-                            v_model=("robust_range", False), label="Robust range (1-99%)",
-                            density="compact", hide_details=True, color="primary",
-                        )
-                        _switch("use_cell_data", "True cell values")
+                        _switch("robust_range", "Robust range (1-99%)", defer=True)
+                        _switch("use_cell_data", "True cell values", defer=True)
                         # 0 (or blank) = smooth; >0 bands the map into that many colours.
                         v3.VTextField(
-                            v_model_number=("n_colors", 0), label="Bands",
+                            v_model_number=("n_colors_draft", 0), label="Bands",
                             type="number", min=0, max=256,
                             classes="mt-2 js-bands", **_FIELD,
                         )
                         with html.Div(classes="d-flex mt-3", style="gap: 8px"):
-                            v3.VTextField(v_model_number=("range_min", 0.0),
+                            v3.VTextField(v_model_number=("range_min_draft", 0.0),
                                           label="Min", type="number", **_FIELD)
-                            v3.VTextField(v_model_number=("range_max", 1.0),
+                            v3.VTextField(v_model_number=("range_max_draft", 1.0),
                                           label="Max", type="number", **_FIELD)
+                        v3.VBtn(
+                            "Apply", block=True, color="primary", variant="tonal",
+                            size="small", classes="mt-3 js-apply-coloropts",
+                            click=self.ctrl.apply_coloropts,
+                        )
 
             v3.VSpacer()
 
@@ -1352,19 +1380,25 @@ class FoamViz:
 
     def _tool_stream(self, title, icon):
         with _section(title, icon):
+            # Vector field stays live (it also drives the arrows); the tuning
+            # below is heavy, so it defers to Apply (drafts, committed in one go).
             v3.VSelect(
                 v_model=("vector_field", None),
                 items=("vector_items",),
                 label="Vector field",
                 **_SELECT,
             )
-            _slider("stream_seeds", "Seeds", 5, 400, 5, debounce=True)
-            _switch("stream_tubes", "Tubes")
-            with html.Div(v_if="!stream_tubes"):
-                _slider("stream_line_width", "Line width", 0.5, 6.0, 0.5)
-            with html.Div(v_if="stream_tubes"):
-                _slider("stream_radius", "Tube width", 0.2, 5.0, 0.1)
-            _slider("stream_length", "Max length (x domain)", 0.5, 15.0, 0.5, debounce=True)
+            _slider("stream_seeds", "Seeds", 5, 400, 5, defer=True)
+            _switch("stream_tubes", "Tubes", defer=True)
+            with html.Div(v_if="!stream_tubes_draft"):
+                _slider("stream_line_width", "Line width", 0.5, 6.0, 0.5, defer=True)
+            with html.Div(v_if="stream_tubes_draft"):
+                _slider("stream_radius", "Tube width", 0.2, 5.0, 0.1, defer=True)
+            _slider("stream_length", "Max length (x domain)", 0.5, 15.0, 0.5, defer=True)
+            v3.VBtn(
+                "Apply", block=True, color="primary", variant="tonal", size="small",
+                classes="mt-2 js-apply-stream", click=self.ctrl.apply_stream,
+            )
 
     def _tool_glyph(self, title, icon):
         with _section(title, icon):
@@ -1591,22 +1625,36 @@ def _format_ticks(values):
 # Heavy sliders whose change handler rebuilds geometry — debounced so the work
 # runs once on release, not on every tick of a drag. Each gets a `<name>_draft`
 # mirror in the state; _sync_drafts() keeps it aligned on programmatic changes.
+# Per-slider release-commit (a `<name>_draft` mirror; the real var is written on
+# thumb release). The glyph tool stays live this way.
 _DEBOUNCED = (
-    "stream_seeds",
-    "stream_length",
     "glyph_count",
 )
 
+# Settings deferred behind an Apply button: their inputs bind to `<name>_draft`
+# and only reach the real var (one recompute) when Apply commits the group.
+# Drafts are synced from the real vars when the panel opens. Grouped vars carry
+# no @change handler -- Apply is their sole trigger.
+_APPLY_GROUPS = {
+    "coloropts": ("robust_range", "use_cell_data", "n_colors", "range_min", "range_max"),
+    "stream": ("stream_seeds", "stream_length", "stream_tubes",
+               "stream_radius", "stream_line_width"),
+}
 
-def _slider(name, label, vmin, vmax, step, debounce=False):
+# Every state var that has a `<name>_draft` mirror (initialised + resynced).
+_DRAFTED = _DEBOUNCED + tuple(v for vs in _APPLY_GROUPS.values() for v in vs)
+
+
+def _slider(name, label, vmin, vmax, step, debounce=False, defer=False):
     """A labelled slider that shows its current value.
 
-    ``debounce=True`` binds the thumb (and its live label) to a ``<name>_draft``
-    mirror and only writes the real state var on release (VSlider ``@end``), so
-    an expensive change handler fires once per drag rather than every tick. The
-    real var must be in :data:`_DEBOUNCED` so its draft is initialised and
-    re-synced. Cheap sliders leave ``debounce`` off and stay live."""
-    model = f"{name}_draft" if debounce else name
+    ``debounce=True`` binds the thumb to a ``<name>_draft`` mirror and writes the
+    real var on release (VSlider ``@end``) -- one handler call per drag.
+    ``defer=True`` also binds to the draft but does NOT auto-commit: the value
+    reaches the real var only when the panel's Apply button commits the group.
+    Either way the real var must be drafted (:data:`_DRAFTED`). Plain sliders
+    stay live."""
+    model = f"{name}_draft" if (debounce or defer) else name
     with html.Div(classes="mb-2"):
         with html.Div(classes="d-flex justify-space-between"):
             html.Span(label, classes="text-caption text-medium-emphasis")
@@ -1628,9 +1676,10 @@ def _slider(name, label, vmin, vmax, step, debounce=False):
         v3.VSlider(**kwargs)
 
 
-def _switch(name, label):
+def _switch(name, label, defer=False):
+    # defer=True binds to the draft mirror (committed by an Apply button).
     v3.VSwitch(
-        v_model=(name,),
+        v_model=(f"{name}_draft" if defer else name,),
         label=label,
         density="compact",
         hide_details=True,
