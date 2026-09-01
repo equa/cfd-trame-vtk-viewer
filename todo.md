@@ -55,11 +55,11 @@ before very long argument lists.
     open-sync). Streamlines Apply done too.
 - A very nice featyre of ParaView is color-map weigthed opacity. Is is this
   available? If so, please add a toggle in the options. Linear only.
-  — **done server-side, NEEDS BROWSER CHECK**: "Opacity by value (linear)" toggle
-    in the Options popover. LUT is now a discretizable CTF with a linear alpha
-    ramp. Verified the alpha ramps 0..1 on the server; UNKNOWN whether vtk.js
-    local mode renders per-scalar surface opacity. Please try it in the browser
-    and tell me if surfaces fade by value — if not, we drop/rework it.
+  — **REVERTED / not available**: the spike (discretizable CTF + opacity ramp)
+    rendered nothing in vtk.js local mode AND broke colour-map + bands rendering
+    (the discretizable LUT doesn't serialize to vtk.js). Reverted (cd543e2) back
+    to the plain transfer function; colour map + bands work again. Opacity mapping
+    isn't feasible in this local-mode stack without a different approach.
 
 ## Boundary
 
@@ -68,7 +68,10 @@ before very long argument lists.
 ## Streamlines
 
 - Default to line representation, line width 1, (as opposed to Tubes). Toggle
-  for tubes (off by default). — **done**
+  for tubes (off by default). — **done** (two actors toggled by visibility;
+    fixed the tube->line ribbon artefacts that came from swapping a mapper input,
+    86967fc). NB **line width has no effect in the browser** — WebGL caps line
+    width at 1 in most implementations; not fixable from our side.
 - Heavy operation, so needs an Apply button and defer streamline changes. There
   is no need to remember un-applied changes. — **done** (Seeds/Tubes/width/length
     defer to an Apply button; drafts refresh from current when the tool opens).
