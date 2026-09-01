@@ -436,7 +436,13 @@ class FoamViz:
         p.use_cell_data = bool(s.use_cell_data)
         p.apply_color_array()
         if self.case.vector_field_available(s.vector_field):
-            self.case.internal.GetPointData().SetActiveVectors(s.vector_field)
+            # SetActiveVectors bumps the mesh MTime even when the field is already
+            # active (VTK does not short-circuit it) -- which would re-execute the
+            # whole cut/seed/streamline chain on every toggle. Only set on change.
+            pd = self.case.internal.GetPointData()
+            current = pd.GetVectors()
+            if current is None or current.GetName() != s.vector_field:
+                pd.SetActiveVectors(s.vector_field)
 
         p.n_colors = int(s.n_colors or 0)
         p.set_preset(s.preset)

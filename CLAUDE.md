@@ -290,16 +290,24 @@ one `update_scene()` that pushes all state into the pipeline and redraws.
 `colors.py` samples matplotlib colour maps once and serves both the VTK
 transfer function and the HTML legend gradient, so they cannot drift apart.
 
-**Perf invariant (2026-09-01): `apply_color_array` must not re-bake when nothing
-colour-related changed.** `update_scene()` runs on *every* change (incl. a mere
-visibility/opacity toggle), and re-baking `FoamVizColor` mutates `case.internal`
-(Remove/AddArray), bumping its MTime — which forces every downstream filter
-(streamlines, isosurfaces, glyphs) to re-execute *and* re-serialise to the vtk.js
-client. That made toggling one actor as expensive as recomputing the heaviest one
-(e.g. hiding the boundary re-integrated the streamlines). The bake is now guarded
-by a `_baked` signature `(field, component, use_cell_data)`, cleared by
-`update_data()` on reload so fresh data always re-bakes. Keep it: a toggle must
-leave the mesh MTime untouched so ParaView-style cheap visibility changes hold.
+**Perf invariant (2026-09-01): a toggle must leave `case.internal`'s MTime
+untouched.** `update_scene()` runs on *every* change (incl. a mere visibility/
+opacity toggle). If it dirties `case.internal`, its MTime bumps and every filter
+fed by it — the cutter, hence the stream **seeds**, hence the tracer + tube, plus
+isosurfaces and glyphs — re-executes *and* re-serialises to the vtk.js client
+(trame caches serialized arrays by MTime, so a bump forces a re-hash/re-encode of
+the big streamline array). That made toggling any actor as expensive as
+recomputing the streamlines. TWO places dirtied it and both are now guarded:
+- `apply_color_array()` re-baked `FoamVizColor` (Remove/AddArray) every call —
+  guarded by a `_baked` signature `(field, component, use_cell_data)`, cleared by
+  `update_data()` on reload so fresh data still re-bakes.
+- `SetActiveVectors(field)` bumps the MTime **even when that field is already
+  active** (VTK doesn't short-circuit it) — `update_scene` now sets it only when
+  `GetVectors().GetName()` actually differs.
+
+Verified by instrumenting the real `update_scene`: on a geometry/surface/slice/
+opacity toggle the internal→cutter→seeds→tracer→tube MTimes all stay stable; a
+real field/vector change still bumps and re-integrates. Keep both guards.
 The cut plane is the hub — the slice and the stream-tracer seeds derive from it
 (the arrows have their own plane grid, see below).
 
