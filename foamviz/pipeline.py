@@ -640,7 +640,8 @@ class FoamPipeline:
             for i, v in enumerate(values):
                 self.contour.SetValue(i, float(v))
 
-    def update_streamlines(self, visible, n_seeds, radius_scale, max_length):
+    def update_streamlines(self, visible, n_seeds, radius_scale, max_length,
+                           tubes, line_width):
         self.stream_actor.SetVisibility(1 if visible else 0)
         if not visible:
             return
@@ -648,7 +649,15 @@ class FoamPipeline:
         diagonal = self.diagonal()
         self.tracer.SetMaximumPropagation(diagonal * max_length)
         self.tracer.SetIntegrationStepUnit(vtk.vtkStreamTracer.CELL_LENGTH_UNIT)
-        self.stream_tube.SetRadius(diagonal * 0.0015 * radius_scale)
+        # Lines (fast, default) read the tracer directly; tubes wrap it (heavier).
+        # SetInputConnection to the same port is a no-op, so a non-tube toggle
+        # leaves this untouched (and the tube filter stays out of the pipeline).
+        if tubes:
+            self.stream_tube.SetRadius(diagonal * 0.0015 * radius_scale)
+            self.stream_mapper.SetInputConnection(self.stream_tube.GetOutputPort())
+        else:
+            self.stream_mapper.SetInputConnection(self.tracer.GetOutputPort())
+            self.stream_actor.GetProperty().SetLineWidth(line_width)
 
     def _configure_glyph_plane(self, axis, coord, n_glyphs):
         """Lay a regular grid over the cut plane, spanning the domain bounds, with

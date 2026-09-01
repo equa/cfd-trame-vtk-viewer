@@ -266,7 +266,9 @@ class FoamViz:
                 # representations
                 "surface_visible": True,
                 "surface_colored": False,
-                "surface_opacity": 0.12,
+                # Opaque by default; surface_cull (on) hides the camera-facing
+                # walls so you still see into the room.
+                "surface_opacity": 1.0,
                 "surface_edges": False,
                 "surface_clip": False,
                 # Cull camera-facing walls by default, so you see into the room.
@@ -286,6 +288,9 @@ class FoamViz:
                 "contour_opacity": 0.35,
                 "stream_visible": False,
                 "stream_seeds": 60,
+                # Lines by default (fast); tubes are opt-in and heavier.
+                "stream_tubes": False,
+                "stream_line_width": 1.0,
                 "stream_radius": 1.4,
                 "stream_length": 4.0,
                 "vector_items": [],
@@ -466,6 +471,8 @@ class FoamViz:
             int(s.stream_seeds),
             float(s.stream_radius),
             float(s.stream_length),
+            bool(s.stream_tubes),
+            float(s.stream_line_width),
         )
         p.update_glyphs(
             s.glyph_visible,
@@ -740,6 +747,7 @@ class FoamViz:
         "stream_visible",
         "stream_seeds",
         "stream_length",
+        "stream_tubes",
         "vector_field",
         "glyph_visible",
         "glyph_source",
@@ -767,6 +775,7 @@ class FoamViz:
         "slice_visible",
         "contour_opacity",
         "stream_radius",
+        "stream_line_width",
         "glyph_scale",
         "geometry_visible",
         "geometry_mode",
@@ -1085,16 +1094,14 @@ class FoamViz:
                 classes="mx-1 js-preset",
                 **_SELECT_BASE,
             )
-            # 0 (or blank) = smooth; >0 bands the map into that many colours.
-            v3.VTextField(
-                v_model_number=("n_colors", 0),
-                label="Bands",
-                type="number",
-                min=0,
-                max=256,
-                style="max-width: 105px",
-                classes="mx-1 js-bands",
-                **_FIELD,
+            # Auto-range toggle sits just left of its manual counterpart, Rescale.
+            v3.VSwitch(
+                v_model=("auto_range", True),
+                label="Auto range",
+                density="compact",
+                hide_details=True,
+                color="primary",
+                classes="mx-2 js-auto-range",
             )
             v3.VBtn(
                 "Rescale",
@@ -1112,17 +1119,17 @@ class FoamViz:
                 with v3.VMenu(activator="parent", location="bottom start",
                               close_on_content_click=False):
                     with v3.VCard(classes="pa-3", min_width="260"):
-                        with v3.VRow(classes="mx-0 align-center"):
-                            v3.VSwitch(
-                                v_model=("auto_range", True), label="Auto range",
-                                density="compact", hide_details=True,
-                                color="primary", classes="mr-3",
-                            )
-                            v3.VSwitch(
-                                v_model=("robust_range", False), label="1-99%",
-                                density="compact", hide_details=True, color="primary",
-                            )
+                        v3.VSwitch(
+                            v_model=("robust_range", False), label="Robust range (1-99%)",
+                            density="compact", hide_details=True, color="primary",
+                        )
                         _switch("use_cell_data", "True cell values")
+                        # 0 (or blank) = smooth; >0 bands the map into that many colours.
+                        v3.VTextField(
+                            v_model_number=("n_colors", 0), label="Bands",
+                            type="number", min=0, max=256,
+                            classes="mt-2 js-bands", **_FIELD,
+                        )
                         with html.Div(classes="d-flex mt-3", style="gap: 8px"):
                             v3.VTextField(v_model_number=("range_min", 0.0),
                                           label="Min", type="number", **_FIELD)
@@ -1352,7 +1359,11 @@ class FoamViz:
                 **_SELECT,
             )
             _slider("stream_seeds", "Seeds", 5, 400, 5, debounce=True)
-            _slider("stream_radius", "Tube width", 0.2, 5.0, 0.1)
+            _switch("stream_tubes", "Tubes")
+            with html.Div(v_if="!stream_tubes"):
+                _slider("stream_line_width", "Line width", 0.5, 6.0, 0.5)
+            with html.Div(v_if="stream_tubes"):
+                _slider("stream_radius", "Tube width", 0.2, 5.0, 0.1)
             _slider("stream_length", "Max length (x domain)", 0.5, 15.0, 0.5, debounce=True)
 
     def _tool_glyph(self, title, icon):

@@ -189,12 +189,19 @@ def main():
     check("isosurfaces have polygons", pipe.contour.GetOutput().GetNumberOfCells() > 0,
           f"{pipe.contour.GetOutput().GetNumberOfCells()} cells")
 
-    pipe.update_streamlines(True, 80, 1.4, 4.0)
+    pipe.update_streamlines(True, 80, 1.4, 4.0, tubes=True, line_width=1.0)
     pipe.tracer.Update()
     lines = pipe.tracer.GetOutput().GetNumberOfLines()
     check("streamlines integrate", lines > 20, f"{lines} lines")
     pipe.stream_tube.Update()
     check("tubes are generated", pipe.stream_tube.GetOutput().GetNumberOfPoints() > 0)
+    # line mode feeds the mapper the raw tracer lines (no tube), tube mode wraps
+    pipe.update_streamlines(True, 80, 1.4, 4.0, tubes=False, line_width=1.0)
+    lines_src = pipe.stream_mapper.GetInputConnection(0, 0).GetProducer()
+    check("line mode maps the tracer directly", lines_src is pipe.tracer)
+    pipe.update_streamlines(True, 80, 1.4, 4.0, tubes=True, line_width=1.0)
+    tube_src = pipe.stream_mapper.GetInputConnection(0, 0).GetProducer()
+    check("tube mode maps the tube filter", tube_src is pipe.stream_tube)
 
     for scale_by in (False, True):
         pipe.update_glyphs(True, "slice", 200, 1.0, scale_by, "z", 0.0)
