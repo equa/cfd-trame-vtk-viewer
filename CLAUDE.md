@@ -289,6 +289,17 @@ everything colours by. `app.py` is the Trame UI: state dict, change handlers,
 one `update_scene()` that pushes all state into the pipeline and redraws.
 `colors.py` samples matplotlib colour maps once and serves both the VTK
 transfer function and the HTML legend gradient, so they cannot drift apart.
+
+**Perf invariant (2026-09-01): `apply_color_array` must not re-bake when nothing
+colour-related changed.** `update_scene()` runs on *every* change (incl. a mere
+visibility/opacity toggle), and re-baking `FoamVizColor` mutates `case.internal`
+(Remove/AddArray), bumping its MTime — which forces every downstream filter
+(streamlines, isosurfaces, glyphs) to re-execute *and* re-serialise to the vtk.js
+client. That made toggling one actor as expensive as recomputing the heaviest one
+(e.g. hiding the boundary re-integrated the streamlines). The bake is now guarded
+by a `_baked` signature `(field, component, use_cell_data)`, cleared by
+`update_data()` on reload so fresh data always re-bakes. Keep it: a toggle must
+leave the mesh MTime untouched so ParaView-style cheap visibility changes hold.
 The cut plane is the hub — the slice and the stream-tracer seeds derive from it
 (the arrows have their own plane grid, see below).
 

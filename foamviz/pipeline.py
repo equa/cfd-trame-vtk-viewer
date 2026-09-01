@@ -43,6 +43,14 @@ class FoamPipeline:
         # Colour the surface/slice by true cell values (flat per cell) rather
         # than the reader's point-interpolated (smooth) values.
         self.use_cell_data = False
+        # Signature of the last COLOR_ARRAY bake, so apply_color_array can skip a
+        # redundant re-bake. Re-baking mutates case.internal (Remove/AddArray),
+        # bumping its MTime -> every downstream filter (streamlines, contour,
+        # glyphs) re-executes and re-serialises to the vtk.js client. Skipping it
+        # when nothing colour-related changed is what makes a visibility/opacity
+        # toggle cheap (the actor flag changes, the heavy geometry does not).
+        # Reset to None by update_data() whenever fresh data is loaded.
+        self._baked = None
         # 0 = smooth colour map; >0 bands it into that many discrete colours.
         self.n_colors = 0
 
@@ -401,6 +409,8 @@ class FoamPipeline:
         if case is None or case.internal is None:
             return
 
+        # Fresh datasets: force a re-bake even if field/component are unchanged.
+        self._baked = None
         self.apply_color_array()
 
         if case.vector_field_available(self.vector_field):
@@ -430,10 +440,17 @@ class FoamPipeline:
         cell data through to the cut faces)."""
         if self.case is None or not self.color_field:
             return
+        # Skip the re-bake (and the mesh-dirtying it causes) when nothing that
+        # affects COLOR_ARRAY changed. update_data() clears self._baked on reload,
+        # so fresh data is always re-baked even if the field/component are the same.
+        signature = (self.color_field, self.color_component, self.use_cell_data)
+        if signature == self._baked:
+            return
         for dataset in self.case.datasets():
             self._bake_color(dataset.GetPointData())
             if self.use_cell_data:
                 self._bake_color(dataset.GetCellData())
+        self._baked = signature
 
     def _bake_color(self, attr):
         """Bake ``COLOR_ARRAY`` into one attribute set (point or cell data)."""
