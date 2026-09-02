@@ -701,10 +701,11 @@ class FoamPipeline:
             return
         if source == "isosurface":
             self.glyph_seeds.SetMaximumNumberOfPoints(n_glyphs)
-            self.glyph.SetInputConnection(self.glyph_seeds.GetOutputPort())
+            seed = self.glyph_seeds
         else:  # "plane" — uniform grid over the cut plane
             self._configure_glyph_plane(axis, coord, n_glyphs)
-            self.glyph.SetInputConnection(self.glyph_grid.GetOutputPort())
+            seed = self.glyph_grid
+        self.glyph.SetInputConnection(seed.GetOutputPort())
 
         # Room airflow spans orders of magnitude -- a plume core moving 100x
         # faster than the quiescent bulk. Scaling arrow length by speed makes
@@ -712,15 +713,26 @@ class FoamPipeline:
         # still carry speed in their colour) are the more readable default.
         if scale_by_magnitude and self.vector_field:
             self.glyph.SetScaleModeToScaleByVector()
-            # Normalise by the VECTOR field's own magnitude -- NOT the colour
-            # range: colouring by a large-range scalar (e.g. temperature) must not
-            # shrink the arrows to nothing.
-            _, vmax = self.case.field_range(self.vector_field, "magnitude")
-            reference = max(abs(vmax), 1e-12)
+            reference = self._seed_vector_max(seed)
         else:
             self.glyph.SetScaleModeToDataScalingOff()
             reference = 1.0
         self.glyph.SetScaleFactor(self.diagonal() * 0.035 * scale / reference)
+
+    def _seed_vector_max(self, seed):
+        """Max ``|vector|`` over the glyph SEED points -- the plane grid / iso
+        samples where arrows are actually drawn -- so the fastest *visible* arrow
+        sets the scale, rather than a domain-wide peak that may sit where no arrow
+        is placed. Falls back to the whole-domain magnitude if the seed is empty
+        (no arrows to scale anyway)."""
+        seed.Update()
+        vecs = seed.GetOutput().GetPointData().GetArray(self.vector_field)
+        if vecs is not None and vecs.GetNumberOfTuples():
+            mags = np.linalg.norm(vtk_to_numpy(vecs), axis=1)
+            if mags.size:
+                return max(float(mags.max()), 1e-12)
+        _, vmax = self.case.field_range(self.vector_field, "magnitude")
+        return max(abs(vmax), 1e-12)
 
     # -- camera ------------------------------------------------------------
 
