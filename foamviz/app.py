@@ -713,6 +713,24 @@ class FoamViz:
         self.pipeline.update_data()
         self.update_scene()
 
+    def _push_delta(self):
+        """Push ONLY the changed geometry to the vtk.js client -- no full-scene
+        re-serialisation. ``view.update()`` (view_update) re-stores the entire
+        scene as ``full_state`` on every call, which makes the client rebuild the
+        whole scene each time (the flicker). The live plane-outline preview only
+        moves four points, so during a slider drag we publish just the delta; a
+        full ``view_update()`` on release re-syncs everything. Falls back to a full
+        update if the internals aren't reachable (e.g. no client connected yet)."""
+        view = getattr(self, "_view", None)
+        helper = getattr(view, "_helper", None)
+        protocol = self.server.protocol
+        if helper is None or protocol is None:
+            return self.ctrl.view_update()
+        delta = helper.scene(
+            self.pipeline.render_window, new_state=False, widgets=view._widgets
+        )
+        protocol.publish("trame.vtk.delta", delta)
+
     @change("plane_slider")
     def _on_plane_slide(self, **_):
         """Live, cheap preview while the position slider is dragged: move the red
@@ -721,7 +739,8 @@ class FoamViz:
         if self._loading or self.case is None:
             return
         self.pipeline.update_plane_outline(self.state.plane_axis, float(self.state.plane_slider))
-        self.ctrl.view_update()
+        # Delta-only: just the outline's four points travel, not the whole scene.
+        self._push_delta()
 
     @change("plane_axis")
     def _on_plane_axis(self, **_):
@@ -1460,6 +1479,7 @@ class FoamViz:
                     mode="local",
                     interactive_ratio=1,
                 )
+                self._view = view  # kept for the delta-only preview push (_push_delta)
                 self.ctrl.view_update = view.update
                 self.ctrl.view_reset_camera = view.reset_camera
                 # Push the server camera to the client: in local (vtk.js) mode the
