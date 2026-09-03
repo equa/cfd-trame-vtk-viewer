@@ -21,6 +21,7 @@ import math
 import os
 import shutil
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -738,8 +739,16 @@ class FoamViz:
         everything seeded on the plane recompute once, on release."""
         if self._loading or self.case is None:
             return
+        # Always move the (server-side) outline -- cheap, four points.
         self.pipeline.update_plane_outline(self.state.plane_axis, float(self.state.plane_slider))
-        # Delta-only: just the outline's four points travel, not the whole scene.
+        # But COALESCE the pushes to the client: the slider fires hundreds of
+        # ticks per drag and each push (serialise + publish) is real server work,
+        # so unthrottled they back up and the frame lags. Cap to ~30/s; the exact
+        # final position is pushed on release (plane_slider_release -> full sync).
+        now = time.time()
+        if now - getattr(self, "_last_outline_push", 0.0) < 0.033:
+            return
+        self._last_outline_push = now
         self._push_delta()
 
     @change("plane_axis")
