@@ -104,12 +104,10 @@ def main():
     check("crinkle carries the colour array",
           crink.GetPointData().GetArray(COLOR_ARRAY) is not None)
 
-    # plane outline: four coplanar corners at the cut height (cheap drag preview)
-    pipe.update_plane_outline("z", zmid)
-    op = pipe.plane_outline.GetPoints()
-    zs = {round(op.GetPoint(i)[2], 6) for i in range(4)}
-    check("plane outline is planar", len(zs) == 1, str(zs))
-    check("plane outline sits at the cut height", abs(next(iter(zs)) - zmid) < 1e-6)
+    # (The cut-plane drag preview is no longer a server-side actor: in local mode
+    # it is a client-side vtk.js outline moved in the browser -- see app.py's
+    # plane_outline_* state and the VtkGeometryRepresentation child of the view.
+    # browser_check.py covers it end to end.)
 
     # building geometry (OBJ): the demo case ships a room-box building.obj.
     # One fixed actor; the mode toggles manifold edges on a single

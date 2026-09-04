@@ -261,9 +261,27 @@ class FoamViz:
                 "plane_x": 0.0,
                 "plane_y": 0.0,
                 "plane_z": 0.0,
+                # The slider binds to this live DRAFT (no @change), so dragging it
+                # never runs a heavy handler. The client-side outline (below)
+                # follows the draft in the browser; the committed cut happens on
+                # release. plane_slider_release reads it, _sync_plane_ui sets it.
                 "plane_slider": 0.0,
                 "axis_min": 0.0,
                 "axis_max": 1.0,
+                # Client-side (vtk.js) plane-frame outline: a declarative
+                # VtkGeometryRepresentation child of the view whose actor position
+                # slides along the active axis by plane_slider, entirely in the
+                # browser -- zero server round trips during a drag. The base points
+                # are a rectangle spanning the two non-normal axes at coord 0 on
+                # the normal (position supplies the coordinate); recomputed only on
+                # case load / axis switch by _set_plane_outline_base.
+                "plane_outline_points": [0.0] * 12,
+                "plane_outline_lines": [5, 0, 1, 2, 3, 0],
+                # Shown only while the slider is dragged (start/end). `ready` gates
+                # the child's mount until the vtk.js renderer exists (null until
+                # the first scene sync) -- flipped true on the first grab.
+                "plane_outline_on": False,
+                "plane_outline_ready": False,
                 # representations
                 "surface_visible": True,
                 "surface_colored": False,
@@ -563,6 +581,27 @@ class FoamViz:
         self.state.axis_min = round(lo, 4)
         self.state.axis_max = round(hi, 4)
         self.state.plane_slider = round(self._active_coord(), 4)
+        self._set_plane_outline_base()
+
+    def _set_plane_outline_base(self):
+        """Rebuild the client outline's four corners for the current normal: a
+        rectangle spanning the two non-normal axes over the full domain, at
+        coordinate 0 on the normal (the actor's position supplies the coordinate
+        as the slider moves). Cheap and rare -- only on case load / axis switch."""
+        if self.case is None:
+            return
+        ai = "xyz".index(self.state.plane_axis)
+        others = [i for i in range(3) if i != ai]
+        b = self.case.bounds()
+        u = (b[2 * others[0]], b[2 * others[0] + 1])
+        v = (b[2 * others[1]], b[2 * others[1] + 1])
+        pts = []
+        for uu, vv in [(u[0], v[0]), (u[1], v[0]), (u[1], v[1]), (u[0], v[1])]:
+            corner = [0.0, 0.0, 0.0]
+            corner[others[0]] = uu
+            corner[others[1]] = vv
+            pts += corner
+        self.state.plane_outline_points = pts
 
     def _rescale(self):
         """Recompute the colour range from the data, honouring the range mode."""
@@ -713,15 +752,10 @@ class FoamViz:
         self.pipeline.update_data()
         self.update_scene()
 
-    @change("plane_slider")
-    def _on_plane_slide(self, **_):
-        """Live, cheap preview while the position slider is dragged: move the red
-        plane frame to the dragged coordinate without recutting. The slice and
-        everything seeded on the plane recompute once, on release."""
-        if self._loading or self.case is None:
-            return
-        self.pipeline.update_plane_outline(self.state.plane_axis, float(self.state.plane_slider))
-        self.ctrl.view_update()
+    # NB: plane_slider deliberately has NO @change handler. The slider writes it
+    # live during a drag, but the preview (the client-side outline) follows it in
+    # the browser -- so a per-tick server handler would only reintroduce the lag
+    # this feature removed. The cut runs once, on release (plane_slider_release).
 
     @change("plane_axis")
     def _on_plane_axis(self, **_):
@@ -843,19 +877,15 @@ class FoamViz:
         release and an axis switch."""
         self._busy_call(self._do_plane_apply)
 
-    @controller.set("plane_drag_start")
-    def plane_drag_start(self):
-        """Slider grabbed: show the red plane frame at the current position so it
-        previews the drag. Hidden again on release (plane_slider_release)."""
-        self.pipeline.update_plane_outline(self.state.plane_axis, float(self.state.plane_slider))
-        self.pipeline.set_plane_outline_visible(True)
-        self.ctrl.view_update()
+    # The slider is grabbed/dragged purely client-side (the `start` JS shows the
+    # outline; it then follows plane_slider in the browser). Only the release
+    # round-trips.
 
     @controller.set("plane_slider_release")
     def plane_slider_release(self):
-        """Slider let go: hide the frame, the dragged value becomes the active
-        coordinate (the source of truth), then auto-apply."""
-        self.pipeline.set_plane_outline_visible(False)
+        """Slider let go: hide the client frame, the dragged value becomes the
+        active coordinate (the source of truth), then cut once."""
+        self.state.plane_outline_on = False
         axis = self.state.plane_axis
         setattr(self.state, f"plane_{axis}", round(float(self.state.plane_slider), 4))
         self.plane_apply()
@@ -1319,7 +1349,12 @@ class FoamViz:
                 min=("axis_min",),
                 max=("axis_max",),
                 step=("Math.max((axis_max - axis_min) / 500, 0.001)",),
-                start=(self.ctrl.plane_drag_start,),
+                # Grab: show the client-side red frame (and mount it the first
+                # time -- the vtk.js renderer exists by now). Both are pure
+                # client-state writes, so no round trip. The frame then follows
+                # plane_slider entirely in the browser (see the outline child in
+                # _content). Release commits the value and cuts once.
+                start="plane_outline_ready = true; plane_outline_on = true",
                 end=(self.ctrl.plane_slider_release,),
                 hide_details=True,
                 density="compact",
@@ -1460,6 +1495,33 @@ class FoamViz:
                     mode="local",
                     interactive_ratio=1,
                 )
+                with view:
+                    # Client-side (vtk.js) plane-frame outline. It injects the same
+                    # "view" context VtkRemoteLocalView provides, so it renders into
+                    # this renderer and shares this camera. Its actor position
+                    # slides it along the active axis by plane_slider -- moved
+                    # entirely in the browser, so a drag costs no server round trip
+                    # (the old server-side frame re-stored full_state every tick).
+                    # v_if defers the mount until the renderer exists (null until
+                    # the first scene sync); the first slider grab flips ready.
+                    with vtk_widgets.VtkGeometryRepresentation(
+                        v_if=("plane_outline_ready",),
+                        property=(
+                            "{ color: [0.9, 0.2, 0.2], representation: 1, "
+                            "lighting: false, lineWidth: 2 }",
+                        ),
+                        actor=(
+                            "{ position: plane_axis == 'x' "
+                            "? [plane_slider, 0, 0] : (plane_axis == 'y' "
+                            "? [0, plane_slider, 0] : [0, 0, plane_slider]), "
+                            "visibility: plane_outline_on }",
+                        ),
+                    ):
+                        vtk_widgets.VtkPolyData(
+                            "plane_outline",
+                            points=("plane_outline_points",),
+                            lines=("plane_outline_lines",),
+                        )
                 self.ctrl.view_update = view.update
                 self.ctrl.view_reset_camera = view.reset_camera
                 # Push the server camera to the client: in local (vtk.js) mode the

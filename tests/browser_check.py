@@ -106,6 +106,41 @@ def main():
                 page.wait_for_timeout(1500)
                 shot("01-default")
 
+                # 1b. cut-plane drag: the red frame is a CLIENT-side vtk.js
+                # outline that follows the slider in the browser (no per-tick
+                # server round trip); the cut lands on release. Verify the frame
+                # actually appears during the drag and the slice then moves.
+                # (The Cut plane tool is the default active tool, slider visible.)
+                def red_pixels(img):
+                    return sum(
+                        1 for r, g, b in img.getdata()
+                        if r > 150 and g < 110 and b < 110
+                    )
+
+                _, before_img = canvas_colours(page)
+                thumb = page.locator(".js-plane-slider .v-slider-thumb").bounding_box()
+                tx = thumb["x"] + thumb["width"] / 2
+                ty = thumb["y"] + thumb["height"] / 2
+                page.mouse.move(tx, ty)
+                page.mouse.down()
+                for i in range(1, 13):
+                    page.mouse.move(tx - i * 6, ty)  # drag toward axis_min
+                    page.wait_for_timeout(50)
+                page.wait_for_timeout(300)
+                _, during_img = canvas_colours(page)
+                shot("01b-plane-drag")
+                red_before, red_during = red_pixels(before_img), red_pixels(during_img)
+                assert red_during > red_before + 200, (
+                    f"client plane outline did not appear on drag "
+                    f"(red px {red_before} -> {red_during})"
+                )
+                print(f"  plane outline appeared on drag: red px "
+                      f"{red_before} -> {red_during}")
+                page.mouse.up()
+                page.wait_for_timeout(3000)  # the cut runs once, on release
+                wait_for_render(page, "plane-moved")
+                shot("01c-plane-moved")
+
                 # 2. streamlines
                 tool("Streamlines")
                 page.locator(".js-show-stream").click()

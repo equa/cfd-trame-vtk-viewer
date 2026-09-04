@@ -47,14 +47,16 @@ assertions need updating — the checks are deliberately concrete.
 
 ## Environment
 
-- **Persistent venv at `/home/node/.venvs/foamviz`** (survives workspace
-  respawns — `/home/node` is a persistent volume, `/workspace` is not). Built
-  from this repo's package set with `vtk-osmesa` 9.3.1 (no system Mesa here).
-  Use it to actually run things:
-  `/home/node/.venvs/foamviz/bin/python tests/test_pipeline.py` (29 checks),
-  or a headless app smoke `... -c "from foamviz.app import FoamViz; FoamViz('data/hotRoom')"`.
-  A project-local `.venv` (763 MB) may also exist but is wiped on respawn.
-- Python 3.12, Ubuntu 24.04 container, **no root, no sudo**.
+- **Container venv at `/opt/venv`, on `PATH`** (2026-09-04): baked into the image
+  from `requirements.txt` with **plain `vtk` 9.7** + system **`libosmesa6`** and
+  the Playwright/Chromium apt libs. `python`/`pip`/`playwright` all resolve to it.
+  Run things directly: `python tests/test_pipeline.py`, `python tests/browser_check.py`.
+  **No `LD_LIBRARY_PATH` staging any more** — apt puts OSMesa on the default
+  linker path. This is the primary env now.
+- Legacy: a `vtk-osmesa` 9.3.1 venv still exists at `/home/node/.venvs/foamviz`
+  (`/home/node` is a persistent volume, `/workspace` is not) — self-contained
+  OSMesa, kept as a fallback; no longer the one to use.
+- Python 3.12, Ubuntu 24.04 container. **No root at runtime** (image built with root).
 - `render_window.GetClassName()` should report `vtkOSOpenGLRenderWindow`.
 
 ### VTK packaging — checked 2026-08-11, don't re-derive
@@ -63,11 +65,11 @@ assertions need updating — the checks are deliberately concrete.
   wheels contain EGL *and* OSMesa render windows and fall back X11 → EGL →
   OSMesa at runtime. They **dlopen** libEGL/libOSMesa instead of bundling, so a
   slim container still needs `apt-get install libosmesa6`.
-- **This container has no system Mesa**, so `.venv` is installed with
-  `vtk-osmesa` 9.3.1 (statically bundles OSMesa, works with zero system deps).
-  That is a deliberate local deviation from `requirements.txt`, not a mistake.
-  With OSMesa staged onto `LD_LIBRARY_PATH`, stock `vtk` 9.6.2 works here too —
-  both the 29 pipeline checks and the 9-step browser suite pass on it.
+- **The image now installs `libosmesa6` (apt)**, so `/opt/venv` runs stock `vtk`
+  9.7 straight from `requirements.txt` — no `vtk-osmesa`, no `LD_LIBRARY_PATH`.
+  Verified 2026-09-04: the 9-step browser suite is green on it. (Older containers
+  had no system Mesa and used `vtk-osmesa` 9.3.1 as a self-contained fallback —
+  see the legacy venv note above.)
 - `vtk-osmesa` is a dead end and should not be the default: not on PyPI
   (`--extra-index-url https://wheels.vtk.org`, which 301s to a GitLab package
   index), frozen at **9.3.1**, wheels only for cp36–cp312 on linux x86_64 and
@@ -76,10 +78,12 @@ assertions need updating — the checks are deliberately concrete.
   — no VTK pin anywhere. VTK 9.6.2 was verified end-to-end including vtk.js
   client-side serialisation.
 - OpenFOAM 13 at `/opt/cfd/OpenFOAM-13`; `source /opt/cfd/OpenFOAM-13/etc/bashrc`.
-- Playwright's Chromium binaries are cached but its **system libraries are
-  not installed and cannot be** (no root). They are staged into a user prefix
-  and reached via `LD_LIBRARY_PATH` — the recipe is in `README.md`. Without it,
-  Chromium dies with `libglib-2.0.so.0: cannot open shared object file`.
+- **Playwright + Chromium are fully installed in the image (2026-09-04):**
+  browser under `$PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, all Chromium system
+  libs apt-installed (`ldd` on the shell is clean). `browser_check.py` launches
+  headless Chromium (WebGL 2.0 via SwiftShader) with **no `LD_LIBRARY_PATH`**.
+  The old "libs can't be installed, stage on LD_LIBRARY_PATH" recipe is obsolete;
+  the Containerfile apt list (libosmesa6 + ~22 Chromium libs) replaces it.
 
 ## VTK-Python traps hit here
 
@@ -196,7 +200,7 @@ assertions need updating — the checks are deliberately concrete.
   counts** for every filter, because an empty VTK filter raises nothing and
   renders as a plausible blank image.
 - `tests/browser_check.py` — drives real Chromium through 9 steps, fails on any
-  console error. Needs the `LD_LIBRARY_PATH` above.
+  console error. Runs directly under `/opt/venv` now (no `LD_LIBRARY_PATH`).
 - When checking whether the 3D view drew anything, screenshot the **page**, not
   the canvas: a WebGL canvas without `preserveDrawingBuffer` reads back blank
   after the frame is presented.
@@ -252,10 +256,11 @@ buoyancy-driven room airflow with a thermal plume, steady state.
     full all-edges set is built only when wireframe is actually chosen.
   State `geometry_visible/mode/opacity/line_width`; cheap handler. Only
   `building.obj` (or `building<N>.obj`) for now — more `triSurface` files later.
-- **Red plane outline is now drag-only.** Hidden by default; the position
-  slider's `start`/`end` show/hide it (`plane_drag_start` /
-  `plane_slider_release` + `set_plane_outline_visible`); `_on_plane_slide` moves
-  it during the drag. `update_scene` no longer positions it.
+- **Red plane outline is drag-only, and now client-side.** Hidden by default; the
+  position slider's `start` shows it and `plane_slider_release` hides it. It is a
+  declarative vtk.js child moved in the browser — see the DONE note under
+  "Cut-plane slider smoothness" for the full mechanism (this superseded the old
+  server-side `plane_outline` actor / `_on_plane_slide` per-tick move).
 - **The always-on domain outline box (`vtkOutlineFilter`) was removed** — the
   building geometry is the context now.
 
@@ -333,6 +338,65 @@ The cut plane is the hub — the slice and the stream-tracer seeds derive from i
   unlike mask-points on the cut faces which clump where the mesh is fine. "On
   isosurface" seeds off the contour output (mask-points). `update_glyphs` takes
   the plane axis+coord to size the grid.
+
+## UX batch + arrows scaling + cut-plane smoothness (2026-09-01 → 09-04)
+
+- **Arrows (3a316e5):** always orient by a selectable **vector field** (default
+  U), independent of the colour field; **length normalised by the seed set's own
+  max |U|**, not the whole-domain max (arrows went invisible when colouring by a
+  large scalar like T). Selector shares `vector_field` with streamlines.
+- **UX:** streamlines default to **lines** (two actors — line + tube — toggled by
+  visibility, NOT a mapper-input swap, which caused ribbon artefacts, 86967fc);
+  boundary defaults to **opacity 1**; colour **Bands** + range/cell options live
+  in an **Options popover with an Apply button** (defers heavy work on big cases);
+  **Auto-range** toggle sits in the top toolbar. NB **WebGL caps line width at 1**
+  — the stream line-width slider has no visible effect; not fixable.
+- **Colour-map weighted opacity: NOT available (reverted cd543e2).** The
+  discretizable-CTF + opacity-ramp spike rendered nothing in vtk.js local mode
+  and broke colour-map/bands (the discretizable LUT doesn't serialise). Don't
+  retry without a fundamentally different approach.
+- **Cut-plane slider smoothness — DONE (2026-09-04), client-side vtk.js outline.**
+  The red plane frame is now a **declarative client-side outline** — a
+  `VtkGeometryRepresentation` + `VtkPolyData` nested *inside* the
+  `VtkRemoteLocalView` (see `_content`). It injects the same `"view"` context the
+  view provides (`provide("view", c)` → `a.renderer.addActor`), so it renders into
+  **the same vtk.js renderer and shares the camera** — no second renderer, no
+  reverse-engineering. Its **actor `position` slides it** along the active axis by
+  `plane_slider` via an inline ternary binding, moved **entirely in the browser**:
+  the render is client-side and **no heavy per-tick server work runs** (no change
+  handler, no `view.update()`/`full_state` re-store), so the lag is gone (verified:
+  the release is the only committing round trip). That kills what the reverted
+  server-side attempts couldn't (delta push 7ee3d35, throttle 03a5005 — all still
+  paid the round trip + `full_state` re-store on every tick).
+  - **`plane_slider` has NO `@change`.** The slider writes it live; the outline
+    follows it client-side; the cut runs **once**, on release
+    (`plane_slider_release` → commit active coord + `plane_apply`). A per-tick
+    handler would just reintroduce the lag.
+  - **Mount gotchas (cost time, don't re-derive):** in `VtkRemoteLocalView` the
+    vtk.js renderer is **null until the first server scene sync**, so a child
+    mounted immediately crashes in `addActor(null)`. The obvious gate — the view's
+    `afterSceneLoaded` event — **does NOT propagate through the wrapper** in
+    trame-vtk 2.11.16 (never fires on the Python side). So the child is gated
+    `v_if="plane_outline_ready"`, flipped true by the **first slider grab**
+    (`start=` JS, client-side); by then the scene has long existed. `start` also
+    sets `plane_outline_on=true`, `plane_slider_release` sets it false — both
+    client-side writes, no round trip.
+  - **Actor transforms are fine here.** The "actor transforms don't survive
+    serialisation" trap (see Trame traps) is about *server→vtk.js* serialisation;
+    this actor lives natively in the client, so `position`/`visibility` apply
+    directly. A change to the reactive `actor` prop triggers
+    `representation.dataChanged()` → `view.render()`, so it repaints with no
+    server involvement.
+  - **Base points** (the rectangle spanning the two non-normal axes, at coord 0 on
+    the normal — position supplies the coordinate) are rebuilt in Python only on
+    **case load / axis switch** by `_set_plane_outline_base`, from `_sync_plane_ui`.
+  - **Server (remote) render mode:** the declarative child isn't rendered there, so
+    a drag shows **no live outline** — the cut just lands on release. Acceptable:
+    server mode is the GPU-less fallback, and it no longer round-trips per tick
+    either. The old server-side `plane_outline` actor + `update_plane_outline` +
+    `set_plane_outline_visible` were **removed** from `pipeline.py`.
+  - Covered by `browser_check.py` step **1b/1c** (drags the plane slider, asserts
+    the red frame appears mid-drag and the slice moves on release).
 
 ## Backend integration
 
@@ -508,10 +572,10 @@ All of the below shipped (see "Widget re-arrangement — DONE" implementation no
 
 - ~~Delay slider actions until the slider is released.~~ **Done 2026-08-14** for
   the heavy geometry sliders (see "Slider debounce — DONE" above).
-    - ~~Draw a plane outline that follows the slider during the drag.~~ **Done** —
-      the red plane frame (`plane_outline`), moved live on the slider by
-      `_on_plane_slide` without recutting; also marks the seeding plane from any
-      tool.
+    - ~~Draw a plane outline that follows the slider during the drag.~~ **Done**,
+      then made fully client-side **2026-09-04** — the red frame is a declarative
+      vtk.js child of the view, slid in the browser with no server round trip (see
+      the "Cut-plane slider smoothness — DONE" note).
     - ~~Numeric input for the plane position in world coordinates.~~ **Done, then
       reworked 2026-08-16** into X/Y/Z world-point fields + an Apply button, with
       the world point (not a fraction) as the source of truth — see the plane
@@ -557,23 +621,19 @@ model — the earlier fraction/`plane_coord` bidirectional sync was fiddly. Now:
   `plane_axis`.** Only the active-axis coordinate positions the cut (the plane is
   axis-aligned); the other two are remembered, so switching the normal keeps
   them. `_active_coord()` reads `plane_<axis>`; everything funnels through
-  `update_scene()`, which passes it to `update_plane`/`update_plane_outline`
-  (both now take a **world coordinate**, not a fraction — no fractions anywhere).
+  `update_scene()`, which passes it to `update_plane` as a **world coordinate**,
+  not a fraction (no fractions anywhere).
 - **The X/Y/Z fields are inert** (no `@change`) until **Apply** (`plane_apply` →
   `_busy_call(_do_plane_apply)`), which clamps into range, reflects the value on
   the slider (`_sync_plane_ui`) and redraws. That is the "debounce" for typed
   input — keystrokes never redraw.
-- **The slider is a view** on the active axis (`plane_slider`, ranged by
-  `axis_min`/`axis_max`). Dragging fires `_on_plane_slide` → moves the red frame
-  only (`ctrl.view_update`, cheap: only 2-D surfaces are ever drawn, the 12 M
-  volume is filter *input*). Release (`@end` → `ctrl.plane_slider_release`)
-  writes the active coordinate and auto-applies.
+- **The slider drives `plane_slider` live, with NO `@change`** (ranged by
+  `axis_min`/`axis_max`). The client-side red frame follows it in the browser
+  (zero round trips); release (`@end` → `ctrl.plane_slider_release`) writes the
+  active coordinate and cuts once. See "Cut-plane slider smoothness — DONE" for
+  the outline mechanism and the mount gotchas.
 - **Axis switch** (`_on_plane_axis`) just calls `plane_apply`, which re-ranges the
   slider to the new axis and redraws — X/Y/Z untouched.
-- **`plane_outline`**: four points + a line loop, **red** (legible on a future
-  light theme), `LightingOff`, `UseBounds(False)` so its origin-anchored initial
-  points can't skew `ResetCamera` (that was making the render flaky). Always-on,
-  so it also marks the seeding plane from the Streamlines/Arrows tools.
 - Kept axis-aligned; a free plane (arbitrary normal) would be a much bigger
   change and isn't what was asked. Fields take decimals (a slice needs sub-metre
   precision), not integers.

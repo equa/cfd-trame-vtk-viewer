@@ -129,36 +129,13 @@ class FoamPipeline:
         # the two renderers then guess at differently.
         self.slice_actor.GetProperty().LightingOff()
 
-        # Plane outline: an amber frame at the cut plane. It updates live while
-        # the position slider is dragged (cheap -- four points, no recut), so it
-        # previews where the debounced slice will land on release, and it marks
-        # the seeding plane from any tool. Just four corner points + a line loop.
-        self.plane_outline = vtk.vtkPolyData()
-        pts = vtk.vtkPoints()
-        pts.SetNumberOfPoints(4)
-        self.plane_outline.SetPoints(pts)
-        loop = vtk.vtkCellArray()
-        ids = vtk.vtkIdList()
-        for i in (0, 1, 2, 3, 0):
-            ids.InsertNextId(i)
-        loop.InsertNextCell(ids)
-        self.plane_outline.SetLines(loop)
-        self.plane_outline_actor, self.plane_outline_mapper = self._make_actor(
-            scalar_visibility=False
-        )
-        self.plane_outline_mapper.SetInputData(self.plane_outline)
-        pop = self.plane_outline_actor.GetProperty()
-        # Red rather than amber: stays legible against a future light theme.
-        pop.SetColor(0.90, 0.20, 0.20)
-        pop.SetLineWidth(2)
-        pop.LightingOff()
-        # Always within the domain (a cross-section), so keep it out of
-        # ResetCamera -- and out of the way before it is first positioned, when
-        # its four points still sit at the origin.
-        self.plane_outline_actor.SetUseBounds(False)
-        # Shown only while the position slider is being dragged (see
-        # set_plane_outline_visible); hidden the rest of the time.
-        self.plane_outline_actor.SetVisibility(0)
+        # The red plane frame that previews the cut during a slider drag is no
+        # longer a server-side actor. In local (vtk.js) mode -- the default -- it
+        # is a declarative client-side outline (a VtkGeometryRepresentation child
+        # of the view in app.py) whose actor position slides in the browser with
+        # zero server round trips, which is what made the drag smooth. The old
+        # server actor round-tripped every tick (update_plane_outline +
+        # view.update re-storing full_state) and was the cause of the lag.
 
         # --- isosurface ---------------------------------------------------
         self.contour = vtk.vtkContourFilter()
@@ -273,7 +250,6 @@ class FoamPipeline:
         for actor in (
             self.surface_actor,
             self.slice_actor,
-            self.plane_outline_actor,
             self.contour_actor,
             self.stream_line_actor,
             self.stream_tube_actor,
@@ -564,10 +540,6 @@ class FoamPipeline:
             plane.SetOrigin(*origin)
             plane.SetNormal(*normal)
 
-    def set_plane_outline_visible(self, visible):
-        """Show the red plane frame only while the position slider is dragged."""
-        self.plane_outline_actor.SetVisibility(1 if visible else 0)
-
     def update_geometry(self, visible, mode, opacity, line_width):
         """Building geometry as flat lines: feature edges (sharp + boundary) or
         wireframe (every edge). The mode toggles manifold edges on the single
@@ -587,25 +559,6 @@ class FoamPipeline:
         prop = self.geometry_actor.GetProperty()
         prop.SetOpacity(float(opacity))
         prop.SetLineWidth(float(line_width))
-
-    def update_plane_outline(self, axis, coord):
-        """Move the plane frame to world *coord* along *axis* -- four points, no
-        recut, so it is cheap enough to follow a slider drag live."""
-        pos = self._clamp_to_axis(axis, coord)
-        ai = "xyz".index(axis)
-        others = [i for i in range(3) if i != ai]
-        b = self.case.bounds()
-        u = (b[2 * others[0]], b[2 * others[0] + 1])
-        v = (b[2 * others[1]], b[2 * others[1] + 1])
-
-        pts = self.plane_outline.GetPoints()
-        for k, (uu, vv) in enumerate([(u[0], v[0]), (u[1], v[0]), (u[1], v[1]), (u[0], v[1])]):
-            corner = [0.0, 0.0, 0.0]
-            corner[ai] = pos
-            corner[others[0]] = uu
-            corner[others[1]] = vv
-            pts.SetPoint(k, *corner)
-        pts.Modified()
 
     def update_surface(self, visible, colored, opacity, edges, clip, cull):
         self.surface_actor.SetVisibility(1 if visible else 0)
