@@ -277,11 +277,14 @@ class FoamViz:
                 # case load / axis switch by _set_plane_outline_base.
                 "plane_outline_points": [0.0] * 12,
                 "plane_outline_lines": [5, 0, 1, 2, 3, 0],
-                # Shown only while the slider is dragged (start/end). `ready` gates
-                # the child's mount until the vtk.js renderer exists (null until
-                # the first scene sync) -- flipped true on the first grab.
+                # True only while the slider is being dragged (start -> release).
+                # This ALSO gates the child's mount (v_if): the outline exists only
+                # during a drag, so it never lingers to be re-mounted against a
+                # null renderer when the view is torn down and rebuilt (a Client<->
+                # Server mode switch / reconnect nulls the vtk.js renderer, and a
+                # mounted child would then crash in addActor(null)). By drag time
+                # the scene has long rendered, so the renderer is live.
                 "plane_outline_on": False,
-                "plane_outline_ready": False,
                 # representations
                 "surface_visible": True,
                 "surface_colored": False,
@@ -1349,12 +1352,11 @@ class FoamViz:
                 min=("axis_min",),
                 max=("axis_max",),
                 step=("Math.max((axis_max - axis_min) / 500, 0.001)",),
-                # Grab: show the client-side red frame (and mount it the first
-                # time -- the vtk.js renderer exists by now). Both are pure
-                # client-state writes, so no round trip. The frame then follows
-                # plane_slider entirely in the browser (see the outline child in
-                # _content). Release commits the value and cuts once.
-                start="plane_outline_ready = true; plane_outline_on = true",
+                # Grab: mount + show the client-side red frame (a pure client-state
+                # write, no round trip). The frame then follows plane_slider
+                # entirely in the browser (see the outline child in _content).
+                # Release commits the value and cuts once.
+                start="plane_outline_on = true",
                 end=(self.ctrl.plane_slider_release,),
                 hide_details=True,
                 density="compact",
@@ -1502,10 +1504,12 @@ class FoamViz:
                     # slides it along the active axis by plane_slider -- moved
                     # entirely in the browser, so a drag costs no server round trip
                     # (the old server-side frame re-stored full_state every tick).
-                    # v_if defers the mount until the renderer exists (null until
-                    # the first scene sync); the first slider grab flips ready.
+                    # v_if mounts it only while a drag is in progress -- so it is
+                    # never left mounted to hit a null renderer when the view is
+                    # rebuilt (mode switch / reconnect). By drag time the scene has
+                    # rendered, so the renderer is live for addActor.
                     with vtk_widgets.VtkGeometryRepresentation(
-                        v_if=("plane_outline_ready",),
+                        v_if=("plane_outline_on",),
                         property=(
                             "{ color: [0.9, 0.2, 0.2], representation: 1, "
                             "lighting: false, lineWidth: 2 }",

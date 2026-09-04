@@ -373,14 +373,21 @@ The cut plane is the hub — the slice and the stream-tracer seeds derive from i
     (`plane_slider_release` → commit active coord + `plane_apply`). A per-tick
     handler would just reintroduce the lag.
   - **Mount gotchas (cost time, don't re-derive):** in `VtkRemoteLocalView` the
-    vtk.js renderer is **null until the first server scene sync**, so a child
-    mounted immediately crashes in `addActor(null)`. The obvious gate — the view's
-    `afterSceneLoaded` event — **does NOT propagate through the wrapper** in
-    trame-vtk 2.11.16 (never fires on the Python side). So the child is gated
-    `v_if="plane_outline_ready"`, flipped true by the **first slider grab**
-    (`start=` JS, client-side); by then the scene has long existed. `start` also
-    sets `plane_outline_on=true`, `plane_slider_release` sets it false — both
-    client-side writes, no round trip.
+    vtk.js renderer is **null until the first scene sync AND again after the view
+    is torn down** (`beforeDelete` nulls it) — a **Client↔Server mode switch** (or a
+    reconnect) rebuilds the view, so the renderer is transiently null. A child that
+    is *mounted* during that window crashes in `a.renderer.addActor(null)` (the
+    library's `Hh.onMounted` has no null guard). The obvious event gate — the view's
+    `afterSceneLoaded` — **does NOT propagate through the wrapper** in trame-vtk
+    2.11.16 (never fires on the Python side). So the outline is gated
+    **`v_if="plane_outline_on"` — mounted only while a drag is in progress**
+    (`start=` JS sets it true, `plane_slider_release` sets it false, both
+    client-side, no round trip). It therefore never lingers mounted to be caught by
+    a rebuild, and by drag time the scene has long rendered so the renderer is live.
+    (An earlier gate on a persistent `plane_outline_ready` flag flipped on first
+    grab still left the child mounted across a later mode switch → `addActor(null)`
+    "after a while". Don't reintroduce a persistent mount.) Guarded by
+    `browser_check.py` step **8b** (drags the plane after a Server→Client switch).
   - **Actor transforms are fine here.** The "actor transforms don't survive
     serialisation" trap (see Trame traps) is about *server→vtk.js* serialisation;
     this actor lives natively in the client, so `position`/`visibility` apply

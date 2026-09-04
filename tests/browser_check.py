@@ -212,6 +212,26 @@ def main():
                 print("  colour map switched and legend followed")
                 shot("08-viridis")
 
+                # 8b. drag the plane again AFTER the Server->Client round trip
+                # (steps 6 and 8 switched modes, which tears down and rebuilds the
+                # vtk.js view -- the renderer is null during the rebuild). The
+                # client outline must still mount and show without an addActor(null)
+                # crash; the console-error gate below fails the run if it throws.
+                tool("Cut plane")
+                thumb = page.locator(".js-plane-slider .v-slider-thumb").bounding_box()
+                tx = thumb["x"] + thumb["width"] / 2
+                ty = thumb["y"] + thumb["height"] / 2
+                page.mouse.move(tx, ty)
+                page.mouse.down()
+                for i in range(1, 10):
+                    page.mouse.move(tx + i * 8, ty)
+                    page.wait_for_timeout(40)
+                page.wait_for_timeout(300)
+                shot("08b-plane-drag-after-modeswitch")
+                page.mouse.up()
+                page.wait_for_timeout(2500)
+                print("  plane drag after mode switch: no crash")
+
                 # 9. the camera button must deliver a real PNG to the browser
                 with page.expect_download(timeout=30_000) as caught:
                     page.locator(".js-screenshot").click()
