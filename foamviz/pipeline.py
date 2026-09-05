@@ -56,8 +56,32 @@ class FoamPipeline:
 
         self._build_scene()
         self._build_filters()
+        self._bootstrap_empty()
 
     # -- construction -----------------------------------------------------
+
+    def _bootstrap_empty(self):
+        """Give every mapper/source a valid (empty) input before any case loads.
+
+        The app can start with **no case** (service up before cases exist, or an
+        empty case dir -- e.g. a mis-mounted volume on Podman/WSL). In local
+        (vtk.js) mode trame serialises the whole scene on `on_server_ready` and
+        calls ``mapper.GetInputAlgorithm().Update()`` on **every** actor. A mapper
+        with no input connection returns ``None`` there -> ``AttributeError`` ->
+        the process exits and the container restart-loops. `surface_mapper` (its
+        input is set only in `update_surface`) hit exactly that. So default it to
+        `surface_input`, and seed the `case.internal`-fed filters with an empty
+        grid so their `Update()` is a clean no-op (no "0 connections" ERR spam)
+        until `update_data` wires the real case. All of this is overwritten the
+        moment a case loads."""
+        self.surface_mapper.SetInputConnection(self.surface_input.GetOutputPort())
+        self.surface_input.AddInputData(vtk.vtkPolyData())  # append needs >=1 input
+        empty = vtk.vtkUnstructuredGrid()
+        self.cutter.SetInputData(empty)
+        self.crinkle.SetInputData(empty)
+        self.contour.SetInputData(empty)
+        self.tracer.SetInputData(empty)
+        self.glyph_probe.SetSourceData(empty)
 
     def _build_scene(self):
         self.renderer = vtk.vtkRenderer()

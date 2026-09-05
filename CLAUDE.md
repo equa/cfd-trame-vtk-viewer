@@ -429,6 +429,20 @@ Integrating into the EQUA CFD frontend (repo `cfd-restful-backend`, the
   (`_rescan_cases()`, also refreshing the drawer) when the name is unknown — so
   cases created after startup resolve. Note: only lazy rescan on deep link; the
   drawer does not auto-poll for new cases.
+  - **Empty-case startup must not crash the serializer (2026-09-05).** Serving
+    empty used to crash on `on_server_ready`: trame's local-render serializer
+    walks every actor and calls `mapper.GetInputAlgorithm().Update()`, and
+    `surface_mapper` had **no input** until `update_surface` ran (never, with no
+    case) → `AttributeError: 'NoneType'` → the process exits and the container
+    **restart-loops**. This bit Niklas on Podman/WSL, where the case dir came up
+    empty (a mis-mounted volume) — nothing to do with WSL, GL, or the harmless
+    EGL/X11 probe warnings (VTK falls back to OSMesa; that path is fine).
+    `pipeline._bootstrap_empty()` now defaults `surface_mapper` to `surface_input`
+    and seeds the `case.internal`-fed filters (cutter/crinkle/contour/tracer +
+    glyph_probe source) with an empty `vtkUnstructuredGrid`, so the scene
+    serialises to empty geometry cleanly (also kills the `vtkCutter` "0
+    connections" ERR spam). Guarded by a `test_pipeline.py` invariant: with no
+    case loaded, no actor's mapper has a `None` input algorithm.
 - **A2 pending (needs a live proxy, likely Niklas's env):** serving under the
   `/viz/` base path behind nginx — the wslink client must open its WebSocket and
   load assets relative to the mount.

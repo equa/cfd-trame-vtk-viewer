@@ -78,6 +78,19 @@ def main():
 
     print("\npipeline")
     pipe = FoamPipeline()
+    # Empty-case invariant: with NO case loaded, every actor's mapper must still
+    # have a valid input algorithm. trame's local-render serializer calls
+    # mapper.GetInputAlgorithm().Update() on every actor at on_server_ready -- a
+    # None there crashes the process and restart-loops the container (hit when the
+    # case dir is empty, e.g. a mis-mounted volume). See _bootstrap_empty.
+    missing = [
+        a.GetMapper().GetClassName()
+        for a in pipe.renderer.GetActors()
+        if a.GetMapper() is not None and a.GetMapper().GetInputAlgorithm() is None
+    ]
+    check("every mapper has an input before any case loads (empty-case safe)",
+          not missing, str(missing))
+
     pipe.set_case(case)
     pipe.update_data()
     check("defaults to a vector field", pipe.color_field == "U", pipe.color_field)
